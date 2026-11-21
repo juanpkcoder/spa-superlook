@@ -1,0 +1,31 @@
+name = "superlook-estetica-worker"
+main = "src/index.ts"
+compatibility_date = "2025-03-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Servir el Dashboard estático desde ./public (y delegar /api/* y /webhooks/* al Worker)
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = ["/api/*", "/webhooks/*"]
+
+# Variables públicas del entorno (NUNCA colocar llaves privadas aquí)
+[vars]
+DASHBOARD_URL = "http://localhost:3000"
+ADMIN_PHONE = "573102319617"
+WOMPI_BASE_URL = "https://sandbox.wompi.co/v1"
+
+# Binding de Base de Datos Cloudflare D1
+[[d1_databases]]
+binding = "DB"
+database_name = "estetica-db"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+# Binding de Almacenamiento Cloudflare R2
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "estetica-assets"
+
+# Cron Trigger: Ejecución cada hora para recordatorios 24h y 2h
+[triggers]
+crons = ["0 * * * *"]

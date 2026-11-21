@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 380 380" width="100%" height="100%">
+  <defs>
+    <!-- Soft Baby Pink to Baby Blue Gradient -->
+    <linearGradient id="slBgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FCE8F1" />
+      <stop offset="50%" stop-color="#F5F7FA" />
+      <stop offset="100%" stop-color="#E1F3FC" />
+    </linearGradient>
+
+    <linearGradient id="slRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#EEA9C6" />
+      <stop offset="50%" stop-color="#8A92A3" />
+      <stop offset="100%" stop-color="#86C7E8" />
+    </linearGradient>
+
+    <linearGradient id="slPinkAccent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F5B5D0" />
+      <stop offset="100%" stop-color="#E28FB3" />
+    </linearGradient>
+
+    <linearGradient id="slBlueAccent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#9AD6F5" />
+      <stop offset="100%" stop-color="#6CB8E0" />
+    </linearGradient>
+
+    <filter id="softShadow" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#4A505E" flood-opacity="0.14" />
+    </filter>
+  </defs>
+
+  <!-- Outer Emblem Medal -->
+  <circle cx="190" cy="190" r="176" fill="url(#slBgGrad)" stroke="url(#slRingGrad)" stroke-width="5" filter="url(#softShadow)" />
+  <circle cx="190" cy="190" r="163" fill="none" stroke="#C9CFD9" stroke-width="1.5" stroke-dasharray="4 4" />
+  <circle cx="190" cy="190" r="154" fill="none" stroke="url(#slRingGrad)" stroke-width="2" opacity="0.7" />
+
+  <!-- Top Crown / 17 Years Laurel Stars -->
+  <g fill="#6E7585">
+    <!-- Center Diamond Star -->
+    <path d="M190 36 L194 46 L204 50 L194 54 L190 64 L186 54 L176 50 L186 46 Z" fill="url(#slPinkAccent)" />
+    <!-- Left Stars -->
+    <circle cx="156" cy="52" r="3.5" fill="#86C7E8" />
+    <circle cx="136" cy="58" r="2.5" fill="#EEA9C6" />
+    <!-- Right Stars -->
+    <circle cx="224" cy="52" r="3.5" fill="#86C7E8" />
+    <circle cx="244" cy="58" r="2.5" fill="#EEA9C6" />
+  </g>
+
+  <!-- Top Heritage Text -->
+  <text x="190" y="84" text-anchor="middle" font-family="'Playfair Display', 'Georgia', serif" font-size="11.5" font-weight="700" fill="#5D6472" letter-spacing="3.5">
+    EST. 2009 · 17 AÑOS DE ARTE
+  </text>
+
+  <!-- Stylized Beauty Silhouette + Scissors / Floral Flourish -->
+  <!-- Baby Blue Flowing Wave (Left) -->
+  <path d="M98 188 C92 140, 134 106, 178 118 C154 128, 128 156, 136 196 C142 224, 172 238, 198 232 C164 252, 106 232, 98 188 Z"
+        fill="url(#slBlueAccent)" opacity="0.88" />
+
+  <!-- Baby Pink Flowing Wave (Right) -->
+  <path d="M282 174 C288 222, 246 256, 202 244 C226 234, 252 206, 244 166 C238 138, 208 124, 182 130 C216 110, 274 130, 282 174 Z"
+        fill="url(#slPinkAccent)" opacity="0.88" />
+
+  <!-- Central Monogram "SL" + Stylist Crown Silhouette -->
+  <g filter="url(#softShadow)">
+    <text x="188" y="205" text-anchor="middle" font-family="'Playfair Display', 'Times New Roman', serif" font-size="78" font-weight="700" font-style="italic" fill="#3B404B">
+      SL
+    </text>
+  </g>
+
+  <!-- Subtle Sparkle Accents -->
+  <path d="M254 126 L256 133 L263 135 L256 137 L254 144 L252 137 L245 135 L252 133 Z" fill="#6CB8E0" />
+  <path d="M124 220 L126 226 L132 228 L126 230 L124 236 L122 230 L116 228 L122 226 Z" fill="#E28FB3" />
+
+  <!-- Main Brand Name Banner -->
+  <rect x="62" y="254" width="256" height="40" rx="20" fill="#3B404B" />
+  <rect x="65" y="257" width="250" height="34" rx="17" fill="none" stroke="#B5E2FA" stroke-width="1" opacity="0.6" />
+  <text x="190" y="280" text-anchor="middle" font-family="'Montserrat', 'Segoe UI', sans-serif" font-size="20" font-weight="800" fill="#FFFFFF" letter-spacing="5">
+    SUPER LOOK
+  </text>
+
+  <!-- Bottom 17 Years Badge Ribbon -->
+  <rect x="108" y="304" width="164" height="26" rx="13" fill="url(#slPinkAccent)" />
+  <text x="190" y="321" text-anchor="middle" font-family="'Montserrat', 'Segoe UI', sans-serif" font-size="10.5" font-weight="800" fill="#2E323B" letter-spacing="1.8">
+    ★ 17 AÑOS DE TRAYECTORIA ★
+  </text>
+</svg>

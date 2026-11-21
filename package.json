@@ -1,0 +1,23 @@
+{
+  "name": "superlook-workers-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Backend serverless en Cloudflare Workers con Hono, D1, R2, Wompi, WhatsApp Cloud API y Bot con Gemini para estética de belleza en Colombia.",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate:local": "wrangler d1 execute estetica-db --local --file=./schema.sql",
+    "db:migrate:remote": "wrangler d1 execute estetica-db --remote --file=./schema.sql",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@google/genai": "^1.0.0",
+    "hono": "^4.7.4"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261119.1",
+    "typescript": "^5.8.2",
+    "wrangler": "^4.166.0"
+  }
+}

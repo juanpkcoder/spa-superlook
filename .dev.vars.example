@@ -1,0 +1,22 @@
+# ============================================================================
+# SECRETOS LOCALES DE SPA SUPERLOOK (Copiar a .dev.vars y subir con wrangler secret put)
+# NUNCA subir .dev.vars a Git ni poner estas llaves en wrangler.toml
+# ============================================================================
+
+# 1. Seguridad del Dashboard Administrativo (Contraseña/PIN de Mamá y firma HMAC de links)
+ADMIN_DASHBOARD_SECRET=
+
+# 2. Google Gemini AI (Asistente de WhatsApp)
+GEMINI_API_KEY=
+
+# 3. Meta WhatsApp Cloud API (App "SPA Super Look")
+WHATSAPP_PHONE_NUMBER_ID=
+WHATSAPP_ACCESS_TOKEN=
+WHATSAPP_VERIFY_TOKEN=
+META_APP_SECRET=
+
+# 4. Pasarela Wompi (Sandbox / Producción)
+WOMPI_PUBLIC_KEY=
+WOMPI_PRIVATE_KEY=
+WOMPI_EVENTS_SECRET=
+WOMPI_INTEGRITY_SECRET=
