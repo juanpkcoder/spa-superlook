@@ -9,8 +9,36 @@ import {
 import { apiRoutes } from './routes/api';
 import { webhookRoutes } from './routes/webhooks';
 import { processScheduledReminders } from './cron/reminders';
+import { createSupabaseD1Adapter } from './services/supabase-d1';
+import { isValidAdminRequest, timingSafeEqualStr } from './services/security';
 
-const app = new Hono<{ Bindings: Env }>();
+export const app = new Hono<{ Bindings: Env }>();
+
+// Middleware híbrido Cloudflare Workers (D1) + Vercel (Supabase PostgreSQL)
+app.use('*', async (c, next) => {
+  const globalProc = (globalThis as unknown as { process?: { env?: Record<string, string> } })
+    .process;
+  const procEnv = globalProc?.env || {};
+  const mergedEnv = Object.assign(
+    {
+      DASHBOARD_URL: procEnv.DASHBOARD_URL || 'http://localhost:3000',
+      ADMIN_PHONE: procEnv.ADMIN_PHONE || '573102319617',
+      WOMPI_BASE_URL: procEnv.WOMPI_BASE_URL || 'https://sandbox.wompi.co/v1',
+    },
+    procEnv,
+    c.env || {}
+  ) as Env;
+
+  if (!mergedEnv.DB && mergedEnv.SUPABASE_URL && mergedEnv.SUPABASE_SERVICE_ROLE_KEY) {
+    mergedEnv.DB = createSupabaseD1Adapter(
+      mergedEnv.SUPABASE_URL,
+      mergedEnv.SUPABASE_SERVICE_ROLE_KEY
+    );
+  }
+
+  c.env = mergedEnv;
+  await next();
+});
 
 // Configurar CORS restringido únicamente a env.DASHBOARD_URL (y localhost solo en desarrollo)
 app.use(
@@ -56,6 +84,28 @@ app.get('/api/info', (c) => {
   });
 });
 
+// Endpoint para Cron Jobs en Vercel (/api/cron/reminders) o ejecución manual autenticada
+app.get('/api/cron/reminders', async (c) => {
+  const authHeader = c.req.header('Authorization') || '';
+  const cronSecret = (c.env.CRON_SECRET || c.env.ADMIN_DASHBOARD_SECRET || '').trim();
+  const isAdmin = await isValidAdminRequest(c);
+  const isCronAuth =
+    cronSecret !== '' &&
+    authHeader.startsWith('Bearer ') &&
+    timingSafeEqualStr(authHeader.slice(7).trim(), cronSecret);
+
+  if (!isAdmin && !isCronAuth) {
+    return c.json({ ok: false, error: 'No autorizado para ejecutar recordatorios.' }, 401);
+  }
+
+  const summary = await processScheduledReminders(c.env);
+  return c.json({
+    ok: true,
+    negocio: NOMBRE_OFICIAL_NEGOCIO,
+    summary,
+  });
+});
+
 // Rutas de API para el Frontend / Dashboard
 app.route('/api', apiRoutes);
 
@@ -72,7 +122,7 @@ app.all('*', async (c) => {
     service: 'superlook-estetica-worker',
     negocio: NOMBRE_OFICIAL_NEGOCIO,
     modalidad: MODALIDAD_ATENCION_RESERVA,
-    runtime: 'Cloudflare Workers + Hono + D1 + R2',
+    runtime: 'Cloudflare Workers / Vercel Edge + Hono + D1 / Supabase',
     politica_cancelacion: TEXTO_LEGAL_RETENCION_20,
   });
 });

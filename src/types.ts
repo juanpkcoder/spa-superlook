@@ -4,12 +4,17 @@ export interface Env {
   BUCKET?: R2Bucket;
   ASSETS?: Fetcher;
 
-  // Variables públicas en [vars] (wrangler.toml)
+  // Variables públicas en [vars] (wrangler.toml) / Vercel Environment
   DASHBOARD_URL: string;
   ADMIN_PHONE: string;
   WOMPI_BASE_URL: string;
 
-  // Variables secretas (.dev.vars / wrangler secret)
+  // Soporte dual Cloudflare D1 / Supabase PostgreSQL (en Vercel)
+  SUPABASE_URL?: string;
+  SUPABASE_SERVICE_ROLE_KEY?: string;
+  CRON_SECRET?: string;
+
+  // Variables secretas (.dev.vars / wrangler secret / Vercel Env)
   ADMIN_DASHBOARD_SECRET: string;
   WOMPI_PUBLIC_KEY: string;
   WOMPI_PRIVATE_KEY: string;
