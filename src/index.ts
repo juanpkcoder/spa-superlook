@@ -178,6 +178,10 @@ app.get('/api/info', (c) => {
     reembolso_porcentaje: 80,
     db_connected: Boolean(c.env.DB),
     whatsapp_configured: Boolean(c.env.WHATSAPP_PHONE_NUMBER_ID && c.env.WHATSAPP_ACCESS_TOKEN),
+    whatsapp_phone_id_ready: Boolean(c.env.WHATSAPP_PHONE_NUMBER_ID),
+    whatsapp_token_ready: Boolean(c.env.WHATSAPP_ACCESS_TOKEN),
+    gemini_ready: Boolean(c.env.GEMINI_API_KEY),
+    payments_ready: Boolean(c.env.BOLD_IDENTITY_KEY || c.env.WOMPI_PUBLIC_KEY),
   });
 });
 
