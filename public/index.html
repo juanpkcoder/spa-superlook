@@ -253,6 +253,20 @@
           <div id="adminShiftsBoard" class="shifts-board"></div>
         </div>
 
+        <!-- 2B. Bandeja de Chats WhatsApp Business en Vivo (+57 312 4597896) -->
+        <div class="card card-pink" style="margin-bottom: 1.35rem;">
+          <div class="card-header">
+            <div>
+              <h3>💬 Bandeja de Chats WhatsApp en Vivo (+57 312 4597896)</h3>
+              <p class="card-subtitle">Responde directamente desde el WhatsApp oficial de Spa Superlook o pausa el Bot para hablar personalmente</p>
+            </div>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="loadAdminChats()">🔄 Refrescar Chats</button>
+          </div>
+          <div id="adminChatsContainer" class="chats-inbox-grid">
+            <div class="empty-state">Aún no hay conversaciones registradas en el WhatsApp Business.</div>
+          </div>
+        </div>
+
         <div class="grid-two-cols">
           <!-- 3. Historial Completo de Tickets y Reembolsos -->
           <div class="card card-blue">
@@ -318,10 +332,24 @@
 
   <footer class="site-footer">
     <p>
-      <strong>Spa Superlook</strong> · Atención exclusiva bajo reserva previa · Política de cancelación: Reembolso del 80% y retención administrativa del 20% ·
+      <strong>Spa Superlook</strong> · Atención exclusiva bajo reserva previa · Reembolso del 80% / Retención 20% ·
+      <a href="/privacidad.html" class="footer-admin-link">Privacidad y Cookies</a> ·
       <a href="/?admin=1" onclick="event.preventDefault(); switchView('admin');" class="footer-admin-link">Acceso Privado Administración</a>
     </p>
   </footer>
+
+  <!-- Banner discreto de Política de Cookies -->
+  <div id="cookieBanner" class="cookie-banner hidden" role="dialog" aria-label="Aviso de Cookies">
+    <div class="cookie-content">
+      <div class="cookie-text">
+        <strong>🍪 Privacidad y Cookies Esenciales:</strong> En <strong>Spa Superlook</strong> solo usamos almacenamiento técnico necesario para tu reserva segura (sin rastreadores publicitarios).
+        <a href="/privacidad.html" class="footer-admin-link">Leer política completa</a>.
+      </div>
+      <div class="cookie-actions">
+        <button type="button" class="btn btn-primary btn-sm" onclick="acceptCookies()">Aceptar</button>
+      </div>
+    </div>
+  </div>
 
   <script src="/app.js"></script>
 </body>

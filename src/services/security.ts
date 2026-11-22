@@ -3,6 +3,55 @@ import { Env } from '../types';
 
 const encoder = new TextEncoder();
 
+// Rate limiter en memoria con ventana deslizante (protección contra fuerza bruta y spam)
+const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
+
+/**
+ * Aplica límite de peticiones por clave (ej. IP + ruta) en una ventana de tiempo.
+ */
+export function checkRateLimit(
+  key: string,
+  maxRequests: number,
+  windowMs: number
+): { allowed: boolean; retryAfterSec: number } {
+  const now = Date.now();
+  const entry = rateLimitStore.get(key);
+
+  // Limpieza oportunista para evitar crecimiento infinito en memoria
+  if (rateLimitStore.size > 500) {
+    for (const [k, v] of rateLimitStore.entries()) {
+      if (v.resetAt <= now) rateLimitStore.delete(k);
+    }
+  }
+
+  if (!entry || entry.resetAt <= now) {
+    rateLimitStore.set(key, { count: 1, resetAt: now + windowMs });
+    return { allowed: true, retryAfterSec: 0 };
+  }
+
+  if (entry.count >= maxRequests) {
+    return {
+      allowed: false,
+      retryAfterSec: Math.max(1, Math.ceil((entry.resetAt - now) / 1000)),
+    };
+  }
+
+  entry.count += 1;
+  return { allowed: true, retryAfterSec: 0 };
+}
+
+/**
+ * Obtiene la IP del cliente desde headers de Cloudflare / Vercel.
+ */
+export function getClientIp(c: Context<{ Bindings: Env }>): string {
+  return (
+    c.req.header('cf-connecting-ip') ||
+    c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
+    c.req.header('x-real-ip') ||
+    'unknown'
+  );
+}
+
 /**
  * Genera un HMAC-SHA256 en formato hexadecimal usando Web Crypto API.
  */
@@ -70,7 +119,7 @@ export async function buildClientCitaUrl(env: Env, citaId: string): Promise<{
   url: string;
 }> {
   const token = await generateCitaAccessToken(citaId, env);
-  const baseUrl = (env.DASHBOARD_URL || 'http://localhost:3000').replace(/\/$/, '');
+  const baseUrl = (env.DASHBOARD_URL || 'https://spa-superlook.vercel.app').replace(/\/$/, '');
   const url = `${baseUrl}/?cita=${encodeURIComponent(citaId)}&token=${encodeURIComponent(token)}`;
   return { token, url };
 }
@@ -109,12 +158,10 @@ export async function isValidAdminRequest(c: Context<{ Bindings: Env }>): Promis
     return false;
   }
 
-  // 1. Permitir match directo con ADMIN_DASHBOARD_SECRET (útil para API/CLI)
   if (timingSafeEqualStr(token, secret)) {
     return true;
   }
 
-  // 2. Verificar token de sesión firmado: admin.<exp>.<hmac>
   const parts = token.split('.');
   if (parts.length !== 3 || parts[0] !== 'admin') {
     return false;

@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Política de Privacidad, Cookies y Cancelación · Spa Superlook</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/logo-superlook.svg" />
+  <link rel="stylesheet" href="/styles.css" />
+  <style>
+    .legal-doc {
+      max-width: 820px;
+      margin: 2rem auto 3.5rem;
+      padding: 0 1.25rem;
+    }
+    .legal-doc h2 {
+      margin-top: 1.5rem;
+      margin-bottom: 0.5rem;
+      font-size: 1.45rem;
+      color: var(--pink-700);
+    }
+    .legal-doc p, .legal-doc li {
+      font-size: 0.9rem;
+      color: var(--neutral-700);
+      margin-bottom: 0.55rem;
+    }
+    .legal-doc ul {
+      padding-left: 1.35rem;
+      margin-bottom: 0.8rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="ambient-bg" aria-hidden="true">
+    <div class="ambient-orb orb-pink"></div>
+    <div class="ambient-orb orb-blue"></div>
+  </div>
+
+  <header class="site-header">
+    <div class="header-container">
+      <a href="/" class="brand-box" style="text-decoration:none;">
+        <div class="brand-logo">
+          <img src="/assets/logo-superlook-crest.jpg" alt="Spa Superlook" onerror="this.src='/assets/logo-superlook.svg'" />
+        </div>
+        <div>
+          <div class="brand-tag">✨ Documentación Legal</div>
+          <h1 class="brand-title">Spa Superlook</h1>
+        </div>
+      </a>
+      <a href="/" class="btn btn-secondary btn-sm">← Volver al Inicio</a>
+    </div>
+  </header>
+
+  <main class="legal-doc">
+    <article class="card card-pink animate-view">
+      <h1 style="font-size: 2.1rem; margin-bottom: 0.35rem;">Política de Privacidad, Cookies y Reservas</h1>
+      <p style="color: var(--neutral-500); font-size: 0.82rem;">Última actualización: Noviembre 2026 · Spa Superlook (Colombia)</p>
+
+      <h2>1. Tratamiento de Datos Personales (Ley 1581 de 2012 - Colombia)</h2>
+      <p>
+        En <strong>Spa Superlook</strong> protegemos la privacidad de nuestras clientas conforme a la Ley Estatutaria 1581 de 2012 y el Decreto 1377 de 2013 de la República de Colombia.
+        Los datos recolectados (nombre completo, número de WhatsApp y detalles de la reserva) se utilizan exclusivamente para:
+      </p>
+      <ul>
+        <li>Gestionar citas bajo nuestra modalidad de atención <strong>únicamente con reserva previa</strong>.</li>
+        <li>Enviar confirmaciones de pago, tickets digitales y recordatorios automáticos (24 horas y 2 horas antes) a través de la API oficial de WhatsApp Business (Meta Cloud API).</li>
+        <li>Tramitar cancelaciones y devoluciones conforme a nuestra política comercial.</li>
+      </ul>
+      <p>
+        Nunca vendemos ni compartimos tu información con terceros con fines publicitarios. Los pagos en línea se procesan directamente en las pasarelas certificadas PCI-DSS (<strong>Bold</strong> y <strong>Wompi</strong>); Spa Superlook no almacena números de tarjetas ni claves bancarias.
+      </p>
+
+      <h2>2. Política de Cookies y Almacenamiento Local</h2>
+      <p>
+        Este sitio web aplica un enfoque estricto de privacidad mínima:
+      </p>
+      <ul>
+        <li><strong>Cookies / Almacenamiento Técnico Esencial:</strong> Utilizamos únicamente almacenamiento local del navegador (<code>localStorage</code> / <code>sessionStorage</code>) para recordar tu aceptación de cookies y mantener la sesión cifrada con firma criptográfica HMAC del panel administrativo.</li>
+        <li><strong>Sin rastreadores invasivos:</strong> No utilizamos cookies publicitarias de terceros ni vendemos perfiles de navegación.</li>
+        <li><strong>Seguridad en enlaces de citas:</strong> El acceso a la información privada de tu reserva se protege mediante enlaces individuales firmados con criptografía HMAC-SHA256 (<code>?cita=UUID&amp;token=HMAC</code>), garantizando que ninguna otra persona pueda ver tu cita.</li>
+      </ul>
+
+      <h2>3. Política Obligatoria de Reserva Previa y Cancelación (80% / 20%)</h2>
+      <ul>
+        <li><strong>Modalidad de atención:</strong> Spa Superlook atiende <strong>ÚNICAMENTE bajo reserva previa confirmada</strong>. No contamos con horario fijo de atención al público sin cita.</li>
+        <li><strong>Confirmación y bloqueo:</strong> Toda reserva requiere el pago anticipado del 100% del valor del servicio. El horario seleccionado se bloquea temporalmente por 20 minutos mientras completas el pago.</li>
+        <li><strong>Cancelaciones y devoluciones:</strong> En caso de cancelación de una cita pagada, <strong>Spa Superlook retiene el 20%</strong> por gastos administrativos y reserva de agenda, y realiza el <strong>reembolso del 80% restante</strong> del valor pagado.</li>
+      </ul>
+
+      <h2>4. Derechos del Titular y Contacto</h2>
+      <p>
+        Puedes ejercer tus derechos de conocer, actualizar, rectificar o suprimir tus datos personales escribiéndonos a nuestro canal oficial de WhatsApp Business <strong>+57 312 459 7896</strong> o al correo de atención <strong>manantialdeamor523@gmail.com</strong>.
+      </p>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <p><strong>Spa Superlook</strong> · Todos los derechos reservados · <a href="/" class="footer-admin-link">Volver a Reservas</a></p>
+  </footer>
+</body>
+</html>

@@ -16,6 +16,32 @@ import { buildClientCitaUrl } from './security';
 export interface ChatTurn {
   role: 'user' | 'model';
   text: string;
+  sender?: 'client' | 'bot' | 'admin';
+  timestamp?: string;
+}
+
+export interface StoredChatSession {
+  turns: ChatTurn[];
+  human_takeover: boolean;
+}
+
+export function parseChatSession(rawJson: string | null | undefined): StoredChatSession {
+  if (!rawJson) return { turns: [], human_takeover: false };
+  try {
+    const parsed = JSON.parse(rawJson);
+    if (Array.isArray(parsed)) {
+      return { turns: parsed as ChatTurn[], human_takeover: false };
+    }
+    if (parsed && typeof parsed === 'object') {
+      return {
+        turns: Array.isArray(parsed.turns) ? (parsed.turns as ChatTurn[]) : [],
+        human_takeover: Boolean(parsed.human_takeover),
+      };
+    }
+  } catch {
+    // JSON corrupto: reiniciar sesión segura
+  }
+  return { turns: [], human_takeover: false };
 }
 
 interface GeminiFunctionCall {
@@ -276,25 +302,35 @@ export async function handleIncomingWhatsAppMessage(
   fromPhone: string,
   incomingText: string
 ): Promise<string> {
-  // 1. Cargar historial de la sesión desde D1
+  // 1. Cargar historial de la sesión desde D1 / Supabase
   const existingSession = await env.DB.prepare(
     'SELECT telefono, historial_json, updated_at FROM chat_sesiones WHERE telefono = ?1'
   )
     .bind(fromPhone)
     .first<ChatSesionRow>();
 
-  let history: ChatTurn[] = [];
-  if (existingSession?.historial_json) {
-    try {
-      history = JSON.parse(existingSession.historial_json) as ChatTurn[];
-    } catch {
-      history = [];
-    }
+  const session = parseChatSession(existingSession?.historial_json);
+  let history: ChatTurn[] = session.turns;
+  const nowIso = new Date().toISOString();
+
+  history.push({ role: 'user', text: incomingText, sender: 'client', timestamp: nowIso });
+  if (history.length > 20) {
+    history = history.slice(history.length - 20);
   }
 
-  history.push({ role: 'user', text: incomingText });
-  if (history.length > 12) {
-    history = history.slice(history.length - 12);
+  // Si Mamá activó control humano en este chat, guardar el mensaje para su bandeja y no responder con IA
+  if (session.human_takeover) {
+    await env.DB.prepare(
+      `INSERT INTO chat_sesiones (telefono, historial_json, updated_at)
+       VALUES (?1, ?2, ?3)
+       ON CONFLICT(telefono) DO UPDATE SET
+         historial_json = excluded.historial_json,
+         updated_at = excluded.updated_at`
+    )
+      .bind(fromPhone, JSON.stringify({ turns: history, human_takeover: true }), nowIso)
+      .run();
+
+    return '[Modo atención humana activo: mensaje guardado en bandeja de Mamá]';
   }
 
   let replyText = '';
@@ -449,9 +485,9 @@ DATOS Y REGLAS OBLIGATORIAS DEL NEGOCIO:
       `Indícanos tu nombre, qué servicio deseas y para qué fecha/hora para verificar disponibilidad y generarte tu link de pago en Wompi.`;
   }
 
-  // 4. Guardar historial actualizado en D1 (`chat_sesiones`)
-  history.push({ role: 'model', text: replyText });
-  const nowIso = new Date().toISOString();
+  // 4. Guardar historial actualizado en D1 / Supabase (`chat_sesiones`)
+  const replyIso = new Date().toISOString();
+  history.push({ role: 'model', text: replyText, sender: 'bot', timestamp: replyIso });
 
   await env.DB.prepare(
     `INSERT INTO chat_sesiones (telefono, historial_json, updated_at)
@@ -460,7 +496,7 @@ DATOS Y REGLAS OBLIGATORIAS DEL NEGOCIO:
        historial_json = excluded.historial_json,
        updated_at = excluded.updated_at`
   )
-    .bind(fromPhone, JSON.stringify(history), nowIso)
+    .bind(fromPhone, JSON.stringify({ turns: history, human_takeover: false }), replyIso)
     .run();
 
   // 5. Enviar respuesta al cliente por WhatsApp Cloud API

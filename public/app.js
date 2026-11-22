@@ -13,6 +13,7 @@ const state = {
   adminToken: sessionStorage.getItem('superlook_admin_token') || '',
   adminCitas: [],
   adminServicios: [],
+  adminChats: [],
 };
 
 function formatCOP(valor) {
@@ -88,6 +89,7 @@ async function initApp() {
   }
 
   await loadPublicServices();
+  initCookieBanner();
 
   // Verificar si la clienta abrió un link firmado desde WhatsApp (?cita=UUID&token=HMAC)
   // o si tu mamá entró directo con ?admin=1
@@ -103,7 +105,23 @@ async function initApp() {
     await fetchAndRenderPrivateCita(citaParam, tokenParam);
   } else if (adminParam === '1' || window.location.hash === '#admin') {
     switchView('admin');
+  } else if (window.location.hash === '#micita') {
+    switchView('micita');
   }
+}
+
+function initCookieBanner() {
+  const banner = document.getElementById('cookieBanner');
+  if (!banner) return;
+  if (!localStorage.getItem('superlook_cookies_accepted')) {
+    banner.classList.remove('hidden');
+  }
+}
+
+function acceptCookies() {
+  localStorage.setItem('superlook_cookies_accepted', new Date().toISOString());
+  const banner = document.getElementById('cookieBanner');
+  if (banner) banner.classList.add('hidden');
 }
 
 // ============================================================================
@@ -562,9 +580,136 @@ async function loadAdminData() {
     renderAdminTurnosPorJornada();
     renderAdminCitas();
     renderAdminServices();
-    await loadPublicServices();
+    await Promise.all([loadPublicServices(), loadAdminChats()]);
   } catch (err) {
     console.error('Error cargando datos admin:', err);
+  }
+}
+
+// ============================================================================
+// 4B. BANDEJA DE CHATS EN VIVO WHATSAPP BUSINESS (+57 312 4597896)
+// ============================================================================
+async function loadAdminChats() {
+  if (!state.adminToken) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/chats`, {
+      headers: { Authorization: `Bearer ${state.adminToken}` },
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    state.adminChats = data.chats || [];
+    renderAdminChats();
+  } catch (err) {
+    console.error('Error cargando chats WhatsApp:', err);
+  }
+}
+
+function renderAdminChats() {
+  const container = document.getElementById('adminChatsContainer');
+  if (!container) return;
+
+  if (state.adminChats.length === 0) {
+    container.innerHTML =
+      `<div class="empty-state">Aún no hay conversaciones recibidas en el WhatsApp Business (+57 312 4597896). Apenas una clienta escriba, aparecerá aquí en tiempo real.</div>`;
+    return;
+  }
+
+  container.innerHTML = state.adminChats
+    .map((chat) => {
+      const safePhone = escapeHtml(chat.telefono);
+      const messagesHtml = (chat.turns || [])
+        .map((t) => {
+          const cls =
+            t.role === 'user'
+              ? 'chat-bubble-client'
+              : t.sender === 'admin'
+                ? 'chat-bubble-admin'
+                : 'chat-bubble-bot';
+          const label =
+            t.role === 'user'
+              ? 'Clienta'
+              : t.sender === 'admin'
+                ? 'Mamá (Spa Superlook)'
+                : 'Bot IA';
+          return `
+            <div class="chat-bubble ${cls}">
+              <div style="font-size:0.68rem; font-weight:800; opacity:0.75; margin-bottom:0.15rem;">${label}</div>
+              <div>${escapeHtml(t.text)}</div>
+            </div>
+          `;
+        })
+        .join('');
+
+      return `
+        <div class="chat-thread-card">
+          <div class="admin-item-header">
+            <div>
+              <strong>📱 +${safePhone}</strong>
+              <div style="font-size:0.72rem; color:#667085;">Último msg: ${escapeHtml(formatDateTimeLocal(chat.updated_at))}</div>
+            </div>
+            <button type="button" class="btn btn-sm ${chat.human_takeover ? 'btn-success' : 'btn-secondary'}"
+              onclick="toggleChatBotMode('${safePhone}', ${!chat.human_takeover})">
+              ${chat.human_takeover ? '✋ Atendiendo Mamá (Reactivar Bot)' : '🤖 Bot Activo (Pausar Bot)'}
+            </button>
+          </div>
+          <div class="chat-messages-box">${messagesHtml || '<div class="empty-state">Sin mensajes</div>'}</div>
+          <form class="chat-reply-row" onsubmit="sendAdminChatReply(event, '${safePhone}')">
+            <input type="text" id="replyInput_${safePhone}" class="form-control" placeholder="Escribe como Spa Superlook (+57 312 4597896)..." required />
+            <button type="submit" class="btn btn-primary btn-sm">Enviar</button>
+          </form>
+        </div>
+      `;
+    })
+    .join('');
+}
+
+async function sendAdminChatReply(event, telefono) {
+  event.preventDefault();
+  const input = document.getElementById(`replyInput_${telefono}`);
+  if (!input) return;
+  const message = input.value.trim();
+  if (!message) return;
+
+  input.disabled = true;
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/chats/${encodeURIComponent(telefono)}/responder`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${state.adminToken}`,
+      },
+      body: JSON.stringify({ message }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      throw new Error(data.error || 'No se pudo enviar el mensaje de WhatsApp');
+    }
+    input.value = '';
+    await loadAdminChats();
+  } catch (err) {
+    alert(`Error enviando mensaje: ${err.message}`);
+  } finally {
+    input.disabled = false;
+  }
+}
+
+async function toggleChatBotMode(telefono, pauseBot) {
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/chats/${encodeURIComponent(telefono)}/bot-mode`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${state.adminToken}`,
+      },
+      body: JSON.stringify({ human_takeover: pauseBot }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      throw new Error(data.error || 'No se pudo cambiar el modo del Bot');
+    }
+    await loadAdminChats();
+  } catch (err) {
+    alert(`Error: ${err.message}`);
   }
 }
 

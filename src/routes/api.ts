@@ -12,15 +12,18 @@ import {
 import { createWompiPaymentLink } from '../services/wompi';
 import { createBoldPaymentLink } from '../services/bold';
 import { sendWhatsAppText } from '../services/whatsapp';
-import { calcularBloquesDisponibles } from '../services/gemini-bot';
+import { calcularBloquesDisponibles, parseChatSession } from '../services/gemini-bot';
 import {
   buildClientCitaUrl,
+  checkRateLimit,
   createAdminSessionToken,
+  getClientIp,
   getDashboardSigningSecret,
   isValidAdminRequest,
   timingSafeEqualStr,
   verifyCitaAccessToken,
 } from '../services/security';
+import { ChatSesionRow } from '../types';
 
 export const apiRoutes = new Hono<{ Bindings: Env }>();
 
@@ -34,6 +37,18 @@ export const apiRoutes = new Hono<{ Bindings: Env }>();
  * emite un token Bearer firmado con HMAC-SHA256 válido por 24 horas.
  */
 apiRoutes.post('/admin/login', async (c) => {
+  const ip = getClientIp(c);
+  const rl = checkRateLimit(`admin-login:${ip}`, 10, 5 * 60 * 1000);
+  if (!rl.allowed) {
+    return c.json(
+      {
+        ok: false,
+        error: `Demasiados intentos de acceso. Intenta nuevamente en ${rl.retryAfterSec} segundos.`,
+      },
+      429
+    );
+  }
+
   const secret = getDashboardSigningSecret(c.env);
   if (!secret) {
     return c.json(
@@ -167,6 +182,18 @@ apiRoutes.get('/disponibilidad', async (c) => {
  * (?cita=UUID&token=HMAC) junto con el texto legal obligatorio de retención del 20%.
  */
 apiRoutes.post('/reservas', async (c) => {
+  const ip = getClientIp(c);
+  const rl = checkRateLimit(`reservas:${ip}`, 20, 5 * 60 * 1000);
+  if (!rl.allowed) {
+    return c.json(
+      {
+        ok: false,
+        error: `Has realizado demasiadas solicitudes. Intenta de nuevo en ${rl.retryAfterSec} segundos.`,
+      },
+      429
+    );
+  }
+
   let body: {
     cliente_nombre?: string;
     cliente_telefono?: string;
@@ -757,5 +784,150 @@ apiRoutes.delete('/servicios/:id', async (c) => {
     ok: true,
     servicio_id: servicioId,
     activo: 0,
+  });
+});
+
+// ============================================================================
+// 5. BANDEJA DE CHATS EN VIVO DE WHATSAPP BUSINESS (+57 312 4597896) PARA MAMÁ
+// ============================================================================
+
+/**
+ * GET /api/admin/chats
+ * PROTEGIDO (Solo Admin): Devuelve todas las conversaciones de WhatsApp Business guardadas.
+ */
+apiRoutes.get('/admin/chats', async (c) => {
+  const isAdmin = await isValidAdminRequest(c);
+  if (!isAdmin) {
+    return c.json({ ok: false, error: 'No autorizado.' }, 401);
+  }
+
+  const { results } = await c.env.DB.prepare(
+    'SELECT telefono, historial_json, updated_at FROM chat_sesiones ORDER BY updated_at DESC LIMIT 50'
+  ).all<ChatSesionRow>();
+
+  const chats = (results || []).map((row) => {
+    const parsed = parseChatSession(row.historial_json);
+    const lastTurn = parsed.turns[parsed.turns.length - 1] || null;
+    return {
+      telefono: row.telefono,
+      updated_at: row.updated_at,
+      human_takeover: parsed.human_takeover,
+      last_message: lastTurn?.text || '',
+      turns: parsed.turns,
+    };
+  });
+
+  return c.json({
+    ok: true,
+    chats,
+  });
+});
+
+/**
+ * POST /api/admin/chats/:telefono/responder
+ * PROTEGIDO (Solo Admin): Envía un mensaje directo a la clienta DESDE el número oficial
+ * de WhatsApp Business de Spa Superlook (+57 312 4597896) y pausa el Bot en ese chat.
+ */
+apiRoutes.post('/admin/chats/:telefono/responder', async (c) => {
+  const isAdmin = await isValidAdminRequest(c);
+  if (!isAdmin) {
+    return c.json({ ok: false, error: 'No autorizado.' }, 401);
+  }
+
+  const telefono = c.req.param('telefono').replace(/\D/g, '');
+  let body: { message?: string };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ ok: false, error: 'Cuerpo JSON inválido' }, 400);
+  }
+
+  const message = (body.message || '').trim();
+  if (!telefono || !message) {
+    return c.json({ ok: false, error: 'El teléfono y el mensaje son obligatorios.' }, 400);
+  }
+
+  const sendRes = await sendWhatsAppText(c.env, telefono, message);
+  if (!sendRes.ok) {
+    return c.json(
+      { ok: false, error: `Error enviando WhatsApp: ${sendRes.error || 'desconocido'}` },
+      502
+    );
+  }
+
+  const existing = await c.env.DB.prepare(
+    'SELECT telefono, historial_json, updated_at FROM chat_sesiones WHERE telefono = ?1'
+  )
+    .bind(telefono)
+    .first<ChatSesionRow>();
+
+  const session = parseChatSession(existing?.historial_json);
+  const nowIso = new Date().toISOString();
+  session.turns.push({ role: 'model', text: message, sender: 'admin', timestamp: nowIso });
+  if (session.turns.length > 25) {
+    session.turns = session.turns.slice(session.turns.length - 25);
+  }
+  session.human_takeover = true;
+
+  await c.env.DB.prepare(
+    `INSERT INTO chat_sesiones (telefono, historial_json, updated_at)
+     VALUES (?1, ?2, ?3)
+     ON CONFLICT(telefono) DO UPDATE SET
+       historial_json = excluded.historial_json,
+       updated_at = excluded.updated_at`
+  )
+    .bind(telefono, JSON.stringify(session), nowIso)
+    .run();
+
+  return c.json({
+    ok: true,
+    telefono,
+    messageId: sendRes.messageId,
+    human_takeover: true,
+  });
+});
+
+/**
+ * POST /api/admin/chats/:telefono/bot-mode
+ * PROTEGIDO (Solo Admin): Pausa o reactiva el Bot de IA para una clienta específica.
+ */
+apiRoutes.post('/admin/chats/:telefono/bot-mode', async (c) => {
+  const isAdmin = await isValidAdminRequest(c);
+  if (!isAdmin) {
+    return c.json({ ok: false, error: 'No autorizado.' }, 401);
+  }
+
+  const telefono = c.req.param('telefono').replace(/\D/g, '');
+  let body: { human_takeover?: boolean };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ ok: false, error: 'Cuerpo JSON inválido' }, 400);
+  }
+
+  const existing = await c.env.DB.prepare(
+    'SELECT telefono, historial_json, updated_at FROM chat_sesiones WHERE telefono = ?1'
+  )
+    .bind(telefono)
+    .first<ChatSesionRow>();
+
+  const session = parseChatSession(existing?.historial_json);
+  session.human_takeover = Boolean(body.human_takeover);
+  const nowIso = new Date().toISOString();
+
+  await c.env.DB.prepare(
+    `INSERT INTO chat_sesiones (telefono, historial_json, updated_at)
+     VALUES (?1, ?2, ?3)
+     ON CONFLICT(telefono) DO UPDATE SET
+       historial_json = excluded.historial_json,
+       updated_at = excluded.updated_at`
+  )
+    .bind(telefono, JSON.stringify(session), nowIso)
+    .run();
+
+  return c.json({
+    ok: true,
+    telefono,
+    human_takeover: session.human_takeover,
   });
 });

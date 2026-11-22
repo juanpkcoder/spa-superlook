@@ -109,19 +109,27 @@ function readMergedEnv(cfEnv: Partial<Env> | undefined): Env {
   return merged;
 }
 
-// Middleware híbrido Cloudflare Workers (D1) + Vercel Edge/Node (Supabase PostgreSQL)
+// Middleware híbrido Cloudflare Workers (D1) + Vercel Edge/Node (Supabase PostgreSQL) + Cabeceras de Seguridad
 app.use('*', async (c, next) => {
   c.env = readMergedEnv(c.env);
   await next();
+  c.header('X-Frame-Options', 'DENY');
+  c.header('X-Content-Type-Options', 'nosniff');
+  c.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+  c.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  c.header('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
+  if (c.req.path.startsWith('/api/')) {
+    c.header('Cache-Control', 'no-store, max-age=0');
+  }
 });
 
-// Manejo centralizado de errores en JSON limpio
+// Manejo centralizado de errores en JSON limpio (sin filtrar trazas ni credenciales)
 app.onError((err, c) => {
   console.error('Unhandled error in Spa Superlook API:', err);
   return c.json(
     {
       ok: false,
-      error: err instanceof Error ? err.message : 'Error interno del servidor',
+      error: 'Ocurrió un error interno procesando la solicitud. Intenta de nuevo.',
     },
     500
   );
@@ -201,19 +209,36 @@ app.route('/api', apiRoutes);
 // Rutas de Webhooks para Wompi, Bold y Meta WhatsApp Cloud API
 app.route('/webhooks', webhookRoutes);
 
-// Fallback: Si el binding de ASSETS está disponible, sirve el Dashboard; de lo contrario, JSON de estado
+// Fallback y página 404 para rutas no encontradas
 app.all('*', async (c) => {
-  if (c.env.ASSETS) {
-    return c.env.ASSETS.fetch(c.req.raw);
+  if (c.req.path.startsWith('/api/') || c.req.path.startsWith('/webhooks/')) {
+    return c.json(
+      {
+        ok: false,
+        error: 'Recurso no encontrado (404).',
+      },
+      404
+    );
   }
-  return c.json({
-    ok: true,
-    service: 'superlook-estetica-worker',
-    negocio: NOMBRE_OFICIAL_NEGOCIO,
-    modalidad: MODALIDAD_ATENCION_RESERVA,
-    runtime: 'Cloudflare Workers / Vercel Edge + Hono + D1 / Supabase',
-    politica_cancelacion: TEXTO_LEGAL_RETENCION_20,
-  });
+  if (c.env.ASSETS) {
+    const assetRes = await c.env.ASSETS.fetch(c.req.raw);
+    if (assetRes.status === 404) {
+      const notFoundUrl = new URL('/404.html', c.req.url);
+      const custom404 = await c.env.ASSETS.fetch(new Request(notFoundUrl.toString()));
+      return new Response(custom404.body, {
+        status: 404,
+        headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      });
+    }
+    return assetRes;
+  }
+  return c.json(
+    {
+      ok: false,
+      error: 'Página no encontrada (404).',
+    },
+    404
+  );
 });
 
 export default {
