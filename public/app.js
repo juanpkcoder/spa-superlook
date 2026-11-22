@@ -14,6 +14,7 @@ const state = {
   adminCitas: [],
   adminServicios: [],
   adminChats: [],
+  chatPollingTimer: null,
 };
 
 function formatCOP(valor) {
@@ -510,11 +511,32 @@ async function checkAndLoadAdminPanel() {
     loginCard.classList.add('hidden');
     dashboardContent.classList.remove('hidden');
     await loadAdminData();
+    startAdminChatPolling();
   } catch {
+    stopAdminChatPolling();
     state.adminToken = '';
     sessionStorage.removeItem('superlook_admin_token');
     loginCard.classList.remove('hidden');
     dashboardContent.classList.add('hidden');
+  }
+}
+
+function startAdminChatPolling() {
+  stopAdminChatPolling();
+  state.chatPollingTimer = setInterval(() => {
+    const adminVisible = !document.getElementById('viewAdmin')?.classList.contains('hidden');
+    const activeEl = document.activeElement;
+    const isTypingReply = activeEl && activeEl.id && activeEl.id.startsWith('replyInput_');
+    if (state.adminToken && adminVisible && !isTypingReply) {
+      loadAdminChats();
+    }
+  }, 8000);
+}
+
+function stopAdminChatPolling() {
+  if (state.chatPollingTimer) {
+    clearInterval(state.chatPollingTimer);
+    state.chatPollingTimer = null;
   }
 }
 
@@ -547,6 +569,7 @@ async function handleAdminLogin(event) {
 }
 
 function handleAdminLogout() {
+  stopAdminChatPolling();
   state.adminToken = '';
   sessionStorage.removeItem('superlook_admin_token');
   checkAndLoadAdminPanel();
