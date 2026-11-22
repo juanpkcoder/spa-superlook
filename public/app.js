@@ -90,15 +90,19 @@ async function initApp() {
   await loadPublicServices();
 
   // Verificar si la clienta abrió un link firmado desde WhatsApp (?cita=UUID&token=HMAC)
+  // o si tu mamá entró directo con ?admin=1
   const params = new URLSearchParams(window.location.search);
   const citaParam = params.get('cita');
   const tokenParam = params.get('token');
+  const adminParam = params.get('admin');
 
   if (citaParam && tokenParam) {
     document.getElementById('inputLookupCitaId').value = citaParam;
     document.getElementById('inputLookupToken').value = tokenParam;
     switchView('micita');
     await fetchAndRenderPrivateCita(citaParam, tokenParam);
+  } else if (adminParam === '1' || window.location.hash === '#admin') {
+    switchView('admin');
   }
 }
 
@@ -268,6 +272,8 @@ function selectTimeSlot(hhmm) {
   document.querySelectorAll('#slotsContainer .slot-btn').forEach((btn) => {
     btn.classList.toggle('selected', btn.textContent.trim() === hhmm);
   });
+  const stepHorario = document.getElementById('stepPillHorario');
+  if (stepHorario) stepHorario.classList.add('active');
 }
 
 async function handleBookingSubmit(event) {
@@ -553,6 +559,7 @@ async function loadAdminData() {
     state.adminServicios = srvData.servicios || [];
 
     renderAdminKpis();
+    renderAdminTurnosPorJornada();
     renderAdminCitas();
     renderAdminServices();
     await loadPublicServices();
@@ -600,6 +607,98 @@ function renderAdminKpis() {
       <div style="font-size:0.78rem; color:#687082;">Total registrados: ${state.adminServicios.length}</div>
     </div>
   `;
+}
+
+function clearAdminDateFilter() {
+  const dateFilter = document.getElementById('adminFilterFecha');
+  if (dateFilter) dateFilter.value = '';
+  renderAdminTurnosPorJornada();
+}
+
+function getBogotaHourAndYmd(isoString) {
+  const d = new Date(isoString);
+  if (Number.isNaN(d.getTime())) return { hour: 9, ymd: '', hhmm: '' };
+  const bogotaMs = d.getTime() - 5 * 60 * 60 * 1000;
+  const bogotaDate = new Date(bogotaMs);
+  const ymd = bogotaDate.toISOString().slice(0, 10);
+  const hhmm = bogotaDate.toISOString().slice(11, 16);
+  const hour = bogotaDate.getUTCHours();
+  return { hour, ymd, hhmm };
+}
+
+function renderAdminTurnosPorJornada() {
+  const board = document.getElementById('adminShiftsBoard');
+  if (!board) return;
+
+  const filtroEstado = document.getElementById('adminFilterEstado')?.value || 'TODOS';
+  const filtroFecha = document.getElementById('adminFilterFecha')?.value || '';
+
+  const filtradas = state.adminCitas
+    .filter((c) => (filtroEstado === 'TODOS' ? true : c.estado === filtroEstado))
+    .filter((c) => {
+      if (!filtroFecha) return true;
+      const { ymd } = getBogotaHourAndYmd(c.fecha_hora_inicio);
+      return ymd === filtroFecha;
+    })
+    .sort((a, b) => new Date(a.fecha_hora_inicio).getTime() - new Date(b.fecha_hora_inicio).getTime());
+
+  const turnos = {
+    manana: { titulo: '🌅 Turno Mañana (08:00 - 11:59)', items: [] },
+    mediodia: { titulo: '☀️ Turno Mediodía (12:00 - 14:59)', items: [] },
+    tarde: { titulo: '🌇 Turno Tarde (15:00 - 18:00)', items: [] },
+  };
+
+  filtradas.forEach((cita) => {
+    const { hour, ymd, hhmm } = getBogotaHourAndYmd(cita.fecha_hora_inicio);
+    const enriched = { ...cita, _ymd: ymd, _hhmm: hhmm };
+    if (hour < 12) {
+      turnos.manana.items.push(enriched);
+    } else if (hour < 15) {
+      turnos.mediodia.items.push(enriched);
+    } else {
+      turnos.tarde.items.push(enriched);
+    }
+  });
+
+  board.innerHTML = Object.values(turnos)
+    .map((grupo) => {
+      const cardsHtml =
+        grupo.items.length === 0
+          ? `<div class="empty-state" style="padding:0.85rem;">Sin turnos en esta jornada</div>`
+          : grupo.items
+              .map((c) => {
+                const reembolso80 = c.monto_reembolso_80 || Math.round(c.monto_total * 0.8);
+                const waPhone = String(c.cliente_telefono || '').replace(/\D/g, '');
+                const waUrl = waPhone
+                  ? `https://wa.me/${waPhone.startsWith('57') ? waPhone : '57' + waPhone}`
+                  : '#';
+                return `
+                  <div class="ticket-mini-card">
+                    <div class="admin-item-header">
+                      <span class="ticket-time-pill">🗓️ ${escapeHtml(c._ymd)} · ⏰ ${escapeHtml(c._hhmm)}</span>
+                      <span class="status-badge status-${escapeHtml(c.estado)}">${escapeHtml(c.estado)}</span>
+                    </div>
+                    <div style="font-weight:700; margin-top:0.25rem;">💇‍♀️ ${escapeHtml(c.servicio_nombre || 'Servicio')}</div>
+                    <div>👤 ${escapeHtml(c.cliente_nombre)} · <a href="${escapeHtml(waUrl)}" target="_blank" rel="noopener" style="color:#157347; font-weight:700; text-decoration:none;">📲 ${escapeHtml(c.cliente_telefono)}</a></div>
+                    <div style="font-size:0.77rem; color:#667085; margin-top:0.2rem;">
+                      Ticket: <code>#${escapeHtml(c.id.slice(0, 8).toUpperCase())}</code> · Pago: <strong>${formatCOP(c.monto_total)}</strong> (80%: ${formatCOP(reembolso80)})
+                    </div>
+                  </div>
+                `;
+              })
+              .join('');
+
+      return `
+        <div class="shift-column">
+          <div class="shift-column-header">
+            <span>${grupo.titulo}</span>
+            <span class="shift-count-badge">${grupo.items.length}</span>
+          </div>
+          ${cardsHtml}
+        </div>
+      `;
+    })
+    .join('');
 }
 
 function renderAdminCitas() {

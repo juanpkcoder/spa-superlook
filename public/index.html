@@ -3,29 +3,27 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Spa Superlook · Reserva Previa & Gestión de Citas</title>
+  <title>Spa Superlook · Reserva de Citas & Experiencia de Belleza</title>
   <link rel="icon" type="image/svg+xml" href="/assets/logo-superlook.svg" />
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <!-- Barra superior de política obligatoria y modalidad de atención -->
-  <div class="top-policy-bar">
-    <span class="badge-pill">✨ Spa Superlook · Colombia</span>
-    <span>🗓️ <strong>Modalidad:</strong> Atención ÚNICAMENTE bajo reserva previa confirmada</span>
-    <span>•</span>
-    <span>⚖️ <strong>Política Obligatoria de Cancelación:</strong> Reembolso del <strong>80%</strong> del valor pagado y retención del <strong>20%</strong> por gastos administrativos y reserva de agenda</span>
+  <!-- Fondo decorativo animado suave -->
+  <div class="ambient-bg" aria-hidden="true">
+    <div class="ambient-orb orb-pink"></div>
+    <div class="ambient-orb orb-blue"></div>
   </div>
 
-  <!-- Encabezado principal -->
+  <!-- Encabezado minimalista sin anuncios intrusivos -->
   <header class="site-header">
     <div class="header-container">
-      <div class="brand-box">
+      <div class="brand-box" onclick="switchView('reservar')" style="cursor:pointer">
         <div class="brand-logo">
           <img src="/assets/logo-superlook-crest.jpg" alt="Logo Spa Superlook" onerror="this.src='/assets/logo-superlook.svg'" />
         </div>
         <div>
+          <div class="brand-tag">✨ Exclusivo Bajo Reserva Previa</div>
           <h1 class="brand-title">Spa Superlook</h1>
-          <p class="brand-subtitle">Agenda Exclusiva Bajo Reserva Previa · Pagos Wompi · Bot WhatsApp</p>
         </div>
       </div>
 
@@ -34,79 +32,91 @@
           🌸 Agendar Cita
         </button>
         <button id="tabBtnMiCita" class="nav-tab" onclick="switchView('micita')">
-          🎟️ Mi Reserva (Clienta)
+          🎟️ Consultar Mi Ticket
         </button>
-        <button id="tabBtnAdmin" class="nav-tab" onclick="switchView('admin')">
-          🔒 Panel Mamá (Admin)
+        <button id="tabBtnAdmin" class="nav-tab nav-tab-admin" onclick="switchView('admin')" title="Panel Privado de Administración">
+          🔒 Panel Mamá
         </button>
       </nav>
     </div>
   </header>
 
   <main class="main-wrapper">
-    <!-- Banner informativo obligatorio siempre visible -->
-    <section class="legal-notice-banner">
-      <div class="legal-icon">📌</div>
-      <div class="legal-text">
-        <strong>Información Importante de Spa Superlook:</strong>
-        No trabajamos con horario fijo de atención al público sin cita; nuestra disponibilidad depende exclusivamente de las reservas agendadas.
-        Para confirmar tu cita se requiere el pago anticipado del <strong>100%</strong> vía Wompi. En caso de cancelación, se reembolsa el <strong>80%</strong> del valor pagado y se retiene el <strong>20%</strong> por gastos administrativos y bloqueo de agenda.
+    <!-- ================================================================== -->
+    <!-- VISTA 1: AGENDAR RESERVA (LIMPIA, FLUIDA Y CON ANIMACIONES)        -->
+    <!-- ================================================================== -->
+    <section id="viewReservar" class="view-section animate-view">
+      <!-- Indicador visual de pasos fluido -->
+      <div class="steps-bar">
+        <div class="step-pill active">
+          <span class="step-num">1</span>
+          <span>Elige tu Servicio</span>
+        </div>
+        <div class="step-Connector"></div>
+        <div class="step-pill" id="stepPillHorario">
+          <span class="step-num">2</span>
+          <span>Selecciona Fecha y Turno</span>
+        </div>
+        <div class="step-Connector"></div>
+        <div class="step-pill" id="stepPillPago">
+          <span class="step-num">3</span>
+          <span>Recibe tu Ticket Oficial</span>
+        </div>
       </div>
-    </section>
 
-    <!-- ================================================================== -->
-    <!-- VISTA 1: AGENDAR RESERVA (PÚBLICA PARA CLIENTAS)                   -->
-    <!-- ================================================================== -->
-    <section id="viewReservar" class="view-section">
       <div class="grid-two-cols">
         <!-- Columna izquierda: Catálogo de Servicios por Categoría -->
-        <div class="card card-pink">
+        <div class="card card-pink stagger-1">
           <div class="card-header">
             <div>
-              <h2>💇‍♀️ 1. Elige tu Servicio en Spa Superlook</h2>
-              <p class="card-subtitle">Selecciona una categoría y haz clic en el servicio que deseas reservar</p>
+              <h2>💇‍♀️ Catálogo de Servicios</h2>
+              <p class="card-subtitle">Selecciona el tratamiento que deseas agendar</p>
             </div>
           </div>
 
           <div id="categoryFilters" class="category-chips"></div>
           <div id="servicesCatalogList" class="services-grid">
-            <div class="loading-box">Cargando catálogo de servicios...</div>
+            <div class="skeleton-list">
+              <div class="skeleton-card"></div>
+              <div class="skeleton-card"></div>
+              <div class="skeleton-card"></div>
+            </div>
           </div>
         </div>
 
-        <!-- Columna derecha: Formulario de Reserva y Cálculo 80% / 20% -->
-        <div class="card card-blue">
+        <!-- Columna derecha: Reserva de Turno y Resumen 80% / 20% -->
+        <div class="card card-blue stagger-2">
           <div class="card-header">
             <div>
-              <h2>🗓️ 2. Reserva tu Horario y Paga con Wompi</h2>
-              <p class="card-subtitle">El bloqueo temporal para completar el pago dura 20 minutos</p>
+              <h2>🗓️ Agenda tu Turno</h2>
+              <p class="card-subtitle">Atención personalizada únicamente con cita reservada</p>
             </div>
           </div>
 
           <form id="bookingForm" onsubmit="handleBookingSubmit(event)">
             <div class="form-group">
-              <label for="selectServicio">Servicio Seleccionado</label>
+              <label for="selectServicio">Tratamiento Seleccionado</label>
               <select id="selectServicio" class="form-control" onchange="onServiceSelectChange()" required></select>
             </div>
 
             <div class="form-row">
               <div class="form-group">
-                <label for="inputFecha">Fecha de Reserva</label>
+                <label for="inputFecha">Fecha de la Cita</label>
                 <input type="date" id="inputFecha" class="form-control" onchange="loadAvailableSlots()" required />
               </div>
               <div class="form-group">
-                <label for="inputTelefono">WhatsApp (recibirás confirmación)</label>
+                <label for="inputTelefono">Tu WhatsApp</label>
                 <input type="tel" id="inputTelefono" class="form-control" placeholder="Ej: 3102319617" required />
               </div>
             </div>
 
             <div class="form-row">
               <div class="form-group">
-                <label for="inputNombre">Nombre Completo de la Clienta</label>
+                <label for="inputNombre">Tu Nombre Completo</label>
                 <input type="text" id="inputNombre" class="form-control" placeholder="Ej: Valentina Gómez" required />
               </div>
               <div class="form-group">
-                <label for="selectPasarela">Pasarela de Pago</label>
+                <label for="selectPasarela">Medio de Pago en Línea</label>
                 <select id="selectPasarela" class="form-control">
                   <option value="BOLD">💳 Bold (Nequi, PSE, Tarjetas, Bre-B)</option>
                   <option value="WOMPI">💳 Wompi (Bancolombia, Nequi, PSE)</option>
@@ -115,132 +125,152 @@
             </div>
 
             <div class="form-group">
-              <label>Horarios Disponibles (Bajo Reserva Previa)</label>
+              <label>Turnos Disponibles en Tiempo Real</label>
               <div id="slotsContainer" class="slots-grid">
-                <div class="loading-box">Selecciona una fecha para consultar disponibilidad...</div>
+                <div class="loading-box">Consultando disponibilidad...</div>
               </div>
               <input type="hidden" id="inputHoraSeleccionada" required />
             </div>
 
-            <!-- Resumen financiero obligatorio 100% / 80% / 20% -->
+            <!-- Resumen financiero limpio con política obligatoria 80% / 20% integrada -->
             <div class="financial-breakdown" id="bookingBreakdown">
               <div class="breakdown-row">
-                <span>Valor total a pagar (100% anticipado):</span>
+                <span>Valor de la reserva (100% anticipado):</span>
                 <strong id="lblTotal100">$ 0</strong>
               </div>
               <div class="breakdown-row">
-                <span>Retención por cancelación (20% gastos admin. y agenda):</span>
+                <span>Retención administrativa si cancelas (20%):</span>
                 <strong id="lblRetencion20">$ 0</strong>
               </div>
               <div class="breakdown-row highlight-refund">
-                <span>Monto de reembolso si cancelas (80% garantizado):</span>
+                <span>Reembolso garantizado si cancelas (80%):</span>
                 <strong id="lblReembolso80">$ 0</strong>
+              </div>
+              <div class="policy-micro-note">
+                ⚖️ Política Spa Superlook: Toda cancelación reembolsa el 80% del valor pagado y retiene el 20% por gastos administrativos y bloqueo de agenda.
               </div>
             </div>
 
-            <button type="submit" id="btnSubmitBooking" class="btn btn-primary btn-block">
-              💳 Generar Reserva y Link de Pago Wompi
+            <button type="submit" id="btnSubmitBooking" class="btn btn-primary btn-block btn-animated">
+              <span>✨ Confirmar Turno y Ir al Pago</span>
             </button>
           </form>
 
-          <!-- Resultado tras crear reserva -->
+          <!-- Ticket generado tras crear reserva -->
           <div id="bookingResultBox" class="result-box hidden"></div>
         </div>
       </div>
     </section>
 
     <!-- ================================================================== -->
-    <!-- VISTA 2: MI RESERVA PRIVADA (ACCESO SEGURO CON TOKEN HMAC)         -->
+    <!-- VISTA 2: MI TICKET PRIVADO (ACCESO SEGURO CON TOKEN HMAC)          -->
     <!-- ================================================================== -->
-    <section id="viewMiCita" class="view-section hidden">
+    <section id="viewMiCita" class="view-section animate-view hidden">
       <div class="card card-blue max-w-700">
         <div class="card-header">
           <div>
-            <h2>🎟️ Consulta y Gestión Privada de tu Reserva</h2>
-            <p class="card-subtitle">Por privacidad y seguridad, cada cita se consulta únicamente con el enlace firmado enviado a tu WhatsApp</p>
+            <h2>🎟️ Mi Ticket de Reserva</h2>
+            <p class="card-subtitle">Consulta el estado de tu turno o solicita cancelación con reembolso del 80%</p>
           </div>
         </div>
 
         <form id="lookupCitaForm" class="lookup-bar" onsubmit="handleManualCitaLookup(event)">
-          <input type="text" id="inputLookupCitaId" class="form-control" placeholder="ID de tu cita (UUID)" required />
-          <input type="text" id="inputLookupToken" class="form-control" placeholder="Token de seguridad (HMAC)" required />
-          <button type="submit" class="btn btn-secondary">Consultar Cita</button>
+          <input type="text" id="inputLookupCitaId" class="form-control" placeholder="Código ID de tu cita" required />
+          <input type="text" id="inputLookupToken" class="form-control" placeholder="Token de seguridad" required />
+          <button type="submit" class="btn btn-secondary">Ver Ticket</button>
         </form>
 
         <div id="clientCitaDetailBox" class="cita-detail-container">
           <div class="empty-state">
-            Abre el enlace privado que te envió el Bot de WhatsApp de <strong>Spa Superlook</strong> o ingresa el ID y Token de tu reserva arriba.
+            Abre directamente el enlace que recibiste en tu WhatsApp o ingresa el código y token de tu ticket arriba.
           </div>
         </div>
       </div>
     </section>
 
     <!-- ================================================================== -->
-    <!-- VISTA 3: PANEL ADMINISTRATIVO PROTEGIDO (MAMÁ)                     -->
+    <!-- VISTA 3: DASHBOARD PRIVADO DE MAMÁ (MÉTRICAS Y TURNOS POR JORNADA) -->
     <!-- ================================================================== -->
-    <section id="viewAdmin" class="view-section hidden">
-      <!-- Pantalla de Login cuando no hay sesión activa -->
+    <section id="viewAdmin" class="view-section animate-view hidden">
+      <!-- Login Administrativo -->
       <div id="adminLoginCard" class="card card-pink max-w-500">
         <div class="card-header">
           <div>
-            <h2>🔒 Acceso Administrativo · Spa Superlook</h2>
-            <p class="card-subtitle">Exclusivo para administración (Mamá · Alertas al 573102319617)</p>
+            <h2>🔒 Dashboard Privado · Mamá</h2>
+            <p class="card-subtitle">Métricas, agenda por turnos (Mañana / Mediodía / Tarde) y catálogo</p>
           </div>
         </div>
 
         <form id="adminLoginForm" onsubmit="handleAdminLogin(event)">
           <div class="form-group">
-            <label for="inputAdminPassword">Contraseña / PIN Administrativo</label>
-            <input type="password" id="inputAdminPassword" class="form-control" placeholder="Ingresa tu clave administrativa" required />
+            <label for="inputAdminPassword">PIN / Contraseña de Administración</label>
+            <input type="password" id="inputAdminPassword" class="form-control" placeholder="Ingresa tu clave privada" required />
           </div>
           <div id="adminLoginError" class="alert-error hidden"></div>
-          <button type="submit" class="btn btn-primary btn-block">Ingresar al Panel de Administración</button>
+          <button type="submit" class="btn btn-primary btn-block btn-animated">
+            🔓 Entrar a Mi Agenda y Métricas
+          </button>
         </form>
       </div>
 
-      <!-- Panel Administrativo Completo (visible solo tras autenticarse) -->
+      <!-- Contenido del Dashboard Privado (visible tras autenticarse) -->
       <div id="adminDashboardContent" class="hidden">
         <div class="admin-toolbar">
           <div>
-            <h2>🩵 Panel de Control · Spa Superlook</h2>
-            <p class="card-subtitle">WhatsApp Administrador conectado: <strong>573102319617</strong> · Atención solo bajo reserva</p>
+            <h2>🩵 Control de Agenda y Métricas · Spa Superlook</h2>
+            <p class="card-subtitle">Alertas WhatsApp activas al <strong>573102319617</strong> · Atención exclusiva bajo reserva</p>
           </div>
           <div class="toolbar-actions">
-            <button class="btn btn-secondary" onclick="loadAdminData()">🔄 Actualizar Datos</button>
-            <button class="btn btn-danger-outline" onclick="handleAdminLogout()">Cerrar Sesión</button>
+            <button class="btn btn-secondary" onclick="loadAdminData()">🔄 Actualizar Turnos</button>
+            <button class="btn btn-danger-outline" onclick="handleAdminLogout()">Salir</button>
           </div>
         </div>
 
-        <!-- KPIs Financieros y de Agenda -->
+        <!-- 1. Tarjetas de Métricas y Finanzas -->
         <div class="kpi-grid" id="adminKpiGrid"></div>
 
+        <!-- 2. Tablero Visual de Turnos / Tickets por Jornada (Mañana, Mediodía, Tarde) -->
+        <div class="card card-blue" style="margin-bottom: 1.35rem;">
+          <div class="card-header">
+            <div>
+              <h3>🌅 Turnos y Tickets Organizados por Jornada</h3>
+              <p class="card-subtitle">Visualiza tus citas del día o todas las reservas agrupadas por turno</p>
+            </div>
+            <div class="admin-filters-bar">
+              <input type="date" id="adminFilterFecha" class="form-control select-sm" onchange="renderAdminTurnosPorJornada()" title="Filtrar por fecha específica (vacío = todas)" />
+              <button type="button" class="btn btn-secondary btn-sm" onclick="clearAdminDateFilter()">Ver Todas las Fechas</button>
+              <select id="adminFilterEstado" class="form-control select-sm" onchange="renderAdminTurnosPorJornada(); renderAdminCitas();">
+                <option value="TODOS">Todos los estados</option>
+                <option value="CONFIRMADA">✅ Confirmadas (Pagadas)</option>
+                <option value="PENDIENTE_PAGO">⏳ Pendientes de Pago</option>
+                <option value="REEMBOLSO_MANUAL_PENDIENTE">⚠️ Reembolso 80% Pendiente</option>
+                <option value="REEMBOLSADA">🔄 Reembolsadas (80%)</option>
+                <option value="CANCELADA">❌ Canceladas</option>
+              </select>
+            </div>
+          </div>
+
+          <div id="adminShiftsBoard" class="shifts-board"></div>
+        </div>
+
         <div class="grid-two-cols">
-          <!-- Gestión de Citas y Reembolsos del 80% -->
+          <!-- 3. Historial Completo de Tickets y Reembolsos -->
           <div class="card card-blue">
             <div class="card-header">
               <div>
-                <h3>📅 Reservas y Reembolsos (80% / 20%)</h3>
-                <p class="card-subtitle">Cancela reservas o marca como pagados los reembolsos manuales del 80%</p>
+                <h3>🎟️ Todos los Tickets y Gestión de Reembolsos (80%)</h3>
+                <p class="card-subtitle">Cancela reservas o marca como pagadas las devoluciones del 80%</p>
               </div>
-              <select id="adminFilterEstado" class="form-control select-sm" onchange="renderAdminCitas()">
-                <option value="TODOS">Todos los estados</option>
-                <option value="CONFIRMADA">Confirmadas (Pagadas)</option>
-                <option value="PENDIENTE_PAGO">Pendientes de Pago</option>
-                <option value="REEMBOLSO_MANUAL_PENDIENTE">⚠️ Reembolso 80% Pendiente</option>
-                <option value="REEMBOLSADA">Reembolsadas (80% devuelto)</option>
-                <option value="CANCELADA">Canceladas sin pago</option>
-              </select>
             </div>
-
             <div id="adminCitasList" class="admin-list"></div>
           </div>
 
-          <!-- Gestión del Catálogo de Servicios por Categoría -->
+          <!-- 4. Editor del Catálogo de Servicios por Categoría -->
           <div class="card card-pink">
             <div class="card-header">
               <div>
-                <h3>✨ Catálogo de Servicios por Categoría</h3>
-                <p class="card-subtitle">Agrega o actualiza los servicios reales de Spa Superlook en D1</p>
+                <h3>✨ Catálogo de Servicios y Precios</h3>
+                <p class="card-subtitle">Crea, edita o pausa tratamientos por categoría</p>
               </div>
             </div>
 
@@ -259,7 +289,7 @@
 
               <div class="form-group">
                 <label for="srvDescripcion">Descripción</label>
-                <input type="text" id="srvDescripcion" class="form-control" placeholder="Detalle de lo que incluye el servicio" required />
+                <input type="text" id="srvDescripcion" class="form-control" placeholder="Detalle del procedimiento" required />
               </div>
 
               <div class="form-row">
@@ -287,7 +317,10 @@
   </main>
 
   <footer class="site-footer">
-    <p><strong>Spa Superlook</strong> · Atención únicamente bajo reserva previa · Política obligatoria: Reembolso del 80% y retención del 20% por cancelación.</p>
+    <p>
+      <strong>Spa Superlook</strong> · Atención exclusiva bajo reserva previa · Política de cancelación: Reembolso del 80% y retención administrativa del 20% ·
+      <a href="/?admin=1" onclick="event.preventDefault(); switchView('admin');" class="footer-admin-link">Acceso Privado Administración</a>
+    </p>
   </footer>
 
   <script src="/app.js"></script>
