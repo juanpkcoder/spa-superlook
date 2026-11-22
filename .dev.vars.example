@@ -15,7 +15,11 @@ WHATSAPP_ACCESS_TOKEN=
 WHATSAPP_VERIFY_TOKEN=
 META_APP_SECRET=
 
-# 4. Pasarela Wompi (Sandbox / Producción)
+# 4. Pasarela Bold (Principal en Colombia)
+BOLD_IDENTITY_KEY=
+BOLD_SECRET_KEY=
+
+# 5. Pasarela Wompi (Sandbox / Producción)
 WOMPI_PUBLIC_KEY=
 WOMPI_PRIVATE_KEY=
 WOMPI_EVENTS_SECRET=

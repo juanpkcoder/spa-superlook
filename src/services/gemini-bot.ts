@@ -9,6 +9,7 @@ import {
   TEXTO_LEGAL_RETENCION_20,
 } from '../types';
 import { createWompiPaymentLink } from './wompi';
+import { createBoldPaymentLink } from './bold';
 import { sendWhatsAppText } from './whatsapp';
 import { buildClientCitaUrl } from './security';
 
@@ -228,14 +229,24 @@ async function executeBotTool(
     // REQUISITO 3C: Enlace privado firmado con token HMAC exclusivo para esta cita
     const { url: linkGestionCita } = await buildClientCitaUrl(env, citaId);
 
-    const paymentLink = await createWompiPaymentLink(env, {
-      reference: wompiReference,
-      amountCop: montoTotal,
-      serviceName: servicio.nombre,
-      customerName: clienteNombre,
-      customerPhone: fromPhone,
-      redirectUrl: linkGestionCita,
-    });
+    const useBold = Boolean(env.BOLD_IDENTITY_KEY) && !env.WOMPI_PUBLIC_KEY;
+    const paymentLink = useBold
+      ? await createBoldPaymentLink(env, {
+          reference: wompiReference,
+          amountCop: montoTotal,
+          serviceName: servicio.nombre,
+          customerName: clienteNombre,
+          customerPhone: fromPhone,
+          redirectUrl: linkGestionCita,
+        })
+      : await createWompiPaymentLink(env, {
+          reference: wompiReference,
+          amountCop: montoTotal,
+          serviceName: servicio.nombre,
+          customerName: clienteNombre,
+          customerPhone: fromPhone,
+          redirectUrl: linkGestionCita,
+        });
 
     return {
       ok: true,

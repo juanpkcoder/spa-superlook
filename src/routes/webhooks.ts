@@ -10,6 +10,10 @@ import {
   verifyWompiWebhookSignature,
   WompiWebhookPayload,
 } from '../services/wompi';
+import {
+  BoldWebhookEvent,
+  verifyBoldWebhookSignature,
+} from '../services/bold';
 import { sendWhatsAppTemplate, sendWhatsAppText } from '../services/whatsapp';
 import { handleIncomingWhatsAppMessage } from '../services/gemini-bot';
 import {
@@ -180,6 +184,169 @@ webhookRoutes.post('/wompi', async (c) => {
   }
 
   return c.json({ ok: true, status: tx.status });
+});
+
+/**
+ * POST /webhooks/bold
+ * Valida obligatoriamente la firma `x-bold-signature` con `BOLD_SECRET_KEY` (HMAC-SHA256)
+ * y actualiza la cita de forma idempotente en D1 / Supabase.
+ */
+webhookRoutes.post('/bold', async (c) => {
+  const rawBody = await c.req.text();
+  const signatureHeader =
+    c.req.header('x-bold-signature') || c.req.header('X-Bold-Signature');
+
+  const isValidSignature = await verifyBoldWebhookSignature(
+    rawBody,
+    signatureHeader,
+    c.env.BOLD_SECRET_KEY
+  );
+
+  if (!isValidSignature) {
+    return c.json(
+      { ok: false, error: 'Firma x-bold-signature inválida o no autorizada' },
+      401
+    );
+  }
+
+  let payload: BoldWebhookEvent;
+  try {
+    payload = JSON.parse(rawBody) as BoldWebhookEvent;
+  } catch {
+    return c.json({ ok: false, error: 'Payload JSON inválido' }, 400);
+  }
+
+  const reference =
+    payload.data?.metadata?.reference ||
+    payload.data?.reference ||
+    payload.subject ||
+    '';
+
+  if (!reference) {
+    return c.json({ ok: true, ignored: true, reason: 'Sin referencia de cita' });
+  }
+
+  const cita = await c.env.DB.prepare(
+    `SELECT c.*, s.nombre AS servicio_nombre
+     FROM citas c
+     LEFT JOIN servicios s ON s.id = c.servicio_id
+     WHERE c.wompi_reference = ?1`
+  )
+    .bind(reference)
+    .first<CitaConServicioRow>();
+
+  if (!cita) {
+    return c.json(
+      { ok: false, error: `No se encontró cita con referencia=${reference}` },
+      404
+    );
+  }
+
+  const txId = payload.data?.payment_id || payload.id || `bold-${Date.now()}`;
+
+  if (payload.type === 'SALE_APPROVED') {
+    if (cita.estado === 'CONFIRMADA') {
+      return c.json({
+        ok: true,
+        idempotent: true,
+        cita_id: cita.id,
+        estado: 'CONFIRMADA',
+        transaction_id: txId,
+      });
+    }
+
+    const updateRes = await c.env.DB.prepare(
+      `UPDATE citas
+       SET estado = 'CONFIRMADA',
+           wompi_transaction_id = ?1,
+           metodo_pago = ?2
+       WHERE id = ?3 AND estado != 'CONFIRMADA'`
+    )
+      .bind(txId, payload.data?.payment_method || 'BOLD', cita.id)
+      .run();
+
+    if (updateRes.meta.changes === 0) {
+      return c.json({
+        ok: true,
+        idempotent: true,
+        cita_id: cita.id,
+        estado: 'CONFIRMADA',
+        transaction_id: txId,
+      });
+    }
+
+    const servicioNombre = cita.servicio_nombre || `Servicio #${cita.servicio_id}`;
+    const totalStr = formatCOP(cita.monto_total);
+    const reembolso80Str = formatCOP(cita.monto_reembolso_80);
+    const { url: linkGestionCita } = await buildClientCitaUrl(c.env, cita.id);
+
+    const clientConfirmationText =
+      `✅ *¡Pago Aprobado en Bold y Reserva Confirmada en ${NOMBRE_OFICIAL_NEGOCIO}!*\n\n` +
+      `Hola *${cita.cliente_nombre}*, hemos recibido tu pago en Bold.\n` +
+      `• *Servicio:* ${servicioNombre}\n` +
+      `• *Inicio:* ${cita.fecha_hora_inicio}\n` +
+      `• *Total pagado (100%):* ${totalStr}\n` +
+      `• *Referencia:* ${reference} (Tx: ${txId})\n` +
+      `• *Ver o gestionar tu cita:* ${linkGestionCita}\n\n` +
+      `📌 ${TEXTO_LEGAL_RETENCION_20} (Monto de reembolso 80%: ${reembolso80Str}).`;
+
+    await sendWhatsAppTemplate(
+      c.env,
+      cita.cliente_telefono,
+      'cita_confirmada',
+      [
+        cita.cliente_nombre,
+        servicioNombre,
+        cita.fecha_hora_inicio,
+        totalStr,
+        reembolso80Str,
+      ],
+      'es_CO',
+      clientConfirmationText
+    );
+
+    if (c.env.ADMIN_PHONE) {
+      const adminAlertText =
+        `💰 *[${NOMBRE_OFICIAL_NEGOCIO} - Nueva Reserva Confirmada y Pagada en Bold]*\n` +
+        `• ID Cita: ${cita.id}\n` +
+        `• Clienta: ${cita.cliente_nombre} (${cita.cliente_telefono})\n` +
+        `• Servicio: ${servicioNombre}\n` +
+        `• Fecha/Hora: ${cita.fecha_hora_inicio}\n` +
+        `• Pagado (100%): ${totalStr}\n` +
+        `• Reembolso 80% si cancela: ${reembolso80Str}\n` +
+        `• Transacción Bold: ${txId}`;
+
+      await sendWhatsAppText(c.env, c.env.ADMIN_PHONE, adminAlertText);
+    }
+
+    return c.json({
+      ok: true,
+      cita_id: cita.id,
+      estado: 'CONFIRMADA',
+      transaction_id: txId,
+    });
+  }
+
+  if (payload.type === 'SALE_REJECTED' || payload.type === 'VOID_APPROVED') {
+    await c.env.DB.prepare(
+      `UPDATE citas
+       SET estado = 'CANCELADA',
+           wompi_transaction_id = ?1,
+           metodo_pago = 'BOLD'
+       WHERE id = ?2 AND estado = 'PENDIENTE_PAGO'`
+    )
+      .bind(txId, cita.id)
+      .run();
+
+    return c.json({
+      ok: true,
+      cita_id: cita.id,
+      estado: 'CANCELADA',
+      event_type: payload.type,
+    });
+  }
+
+  return c.json({ ok: true, event_type: payload.type });
 });
 
 /**

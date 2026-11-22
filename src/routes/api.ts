@@ -10,6 +10,7 @@ import {
   TEXTO_LEGAL_RETENCION_20,
 } from '../types';
 import { createWompiPaymentLink } from '../services/wompi';
+import { createBoldPaymentLink } from '../services/bold';
 import { sendWhatsAppText } from '../services/whatsapp';
 import { calcularBloquesDisponibles } from '../services/gemini-bot';
 import {
@@ -287,14 +288,30 @@ apiRoutes.post('/reservas', async (c) => {
   // REQUISITO 3C: Construir URL con token HMAC exclusivo para que la clienta solo vea/cancele su cita
   const { token: citaAccessToken, url: citaManageUrl } = await buildClientCitaUrl(c.env, citaId);
 
-  const payment = await createWompiPaymentLink(c.env, {
-    reference: wompiReference,
-    amountCop: precio,
-    serviceName: servicio.nombre,
-    customerName: clienteNombre,
-    customerPhone: clienteTelefono,
-    redirectUrl: citaManageUrl,
-  });
+  const preferredGateway =
+    (body.metodo_pago || '').toUpperCase() === 'BOLD' ||
+    (!c.env.WOMPI_PUBLIC_KEY && Boolean(c.env.BOLD_IDENTITY_KEY))
+      ? 'BOLD'
+      : 'WOMPI';
+
+  const payment =
+    preferredGateway === 'BOLD'
+      ? await createBoldPaymentLink(c.env, {
+          reference: wompiReference,
+          amountCop: precio,
+          serviceName: servicio.nombre,
+          customerName: clienteNombre,
+          customerPhone: clienteTelefono,
+          redirectUrl: citaManageUrl,
+        })
+      : await createWompiPaymentLink(c.env, {
+          reference: wompiReference,
+          amountCop: precio,
+          serviceName: servicio.nombre,
+          customerName: clienteNombre,
+          customerPhone: clienteTelefono,
+          redirectUrl: citaManageUrl,
+        });
 
   return c.json(
     {

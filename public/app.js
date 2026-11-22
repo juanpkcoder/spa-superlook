@@ -283,6 +283,7 @@ async function handleBookingSubmit(event) {
   const nombre = document.getElementById('inputNombre').value.trim();
   const telefono = document.getElementById('inputTelefono').value.trim();
   const fecha = document.getElementById('inputFecha').value;
+  const pasarela = (document.getElementById('selectPasarela')?.value || 'BOLD').toUpperCase();
   const fechaHoraInicio = `${fecha}T${state.selectedHora}:00-05:00`;
 
   submitBtn.disabled = true;
@@ -298,7 +299,7 @@ async function handleBookingSubmit(event) {
         cliente_telefono: telefono,
         servicio_id: Number(state.selectedServicioId),
         fecha_hora_inicio: fechaHoraInicio,
-        metodo_pago: 'WOMPI',
+        metodo_pago: pasarela,
       }),
     });
 

@@ -20,6 +20,8 @@ export interface Env {
   WOMPI_PRIVATE_KEY: string;
   WOMPI_EVENTS_SECRET: string;
   WOMPI_INTEGRITY_SECRET: string;
+  BOLD_IDENTITY_KEY?: string;
+  BOLD_SECRET_KEY?: string;
   WHATSAPP_PHONE_NUMBER_ID: string;
   WHATSAPP_ACCESS_TOKEN: string;
   WHATSAPP_VERIFY_TOKEN: string;
