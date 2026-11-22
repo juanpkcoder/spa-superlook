@@ -1038,3 +1038,316 @@ label {
   color: var(--neutral-700);
   flex: 1;
 }
+
+/* Sub-pestañas del Panel Privado de Mamá */
+.admin-subtabs {
+  display: flex;
+  gap: 0.45rem;
+  margin-bottom: 1.15rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 0.25rem;
+  scrollbar-width: none;
+}
+
+.admin-subtabs::-webkit-scrollbar {
+  display: none;
+}
+
+.admin-subtab {
+  border: 1px solid var(--neutral-200);
+  background: #fff;
+  color: var(--neutral-700);
+  padding: 0.55rem 0.95rem;
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.22s var(--ease-out-expo);
+}
+
+.admin-subtab.active {
+  background: linear-gradient(135deg, var(--pink-700), var(--blue-600));
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 6px 14px rgba(158, 51, 99, 0.24);
+}
+
+/* ============================================================================
+   OPTIMIZACIÓN 100% MÓVIL (TELÉFONOS 320px - 768px · TIPO APP NATIVA PARA MAMÁ)
+   ============================================================================ */
+@media (max-width: 768px) {
+  body {
+    padding-bottom: calc(78px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* Evitar zoom automático molesto al tocar inputs en iPhone/Android */
+  input, select, textarea, .form-control {
+    font-size: 16px !important;
+    min-height: 46px;
+  }
+
+  /* Header súper compacto arriba para dejar el contenido visible de inmediato */
+  .site-header {
+    padding: 0.6rem 0.95rem;
+  }
+
+  .header-container {
+    justify-content: center;
+  }
+
+  .brand-logo {
+    width: 44px;
+    height: 44px;
+  }
+
+  .brand-tag {
+    font-size: 0.64rem;
+  }
+
+  .brand-title {
+    font-size: 1.45rem;
+  }
+
+  /* Barra de navegación principal fija abajo como App nativa */
+  .nav-tabs {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 70;
+    border-radius: 18px 18px 0 0;
+    background: rgba(255, 255, 255, 0.97);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border: none;
+    border-top: 1px solid var(--neutral-200);
+    box-shadow: 0 -8px 26px rgba(24, 29, 38, 0.1);
+    padding: 0.45rem 0.5rem calc(0.5rem + env(safe-area-inset-bottom, 0px));
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.35rem;
+    flex-wrap: nowrap;
+  }
+
+  .nav-tab {
+    padding: 0.62rem 0.3rem;
+    font-size: 0.74rem;
+    text-align: center;
+    border-radius: 12px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1.2;
+  }
+
+  .main-wrapper {
+    margin: 0.85rem auto 1.5rem;
+    padding: 0 0.75rem;
+  }
+
+  /* Pasos compactos en una línea limpia */
+  .steps-bar {
+    gap: 0.35rem;
+    margin-bottom: 0.95rem;
+    justify-content: space-between;
+    flex-wrap: nowrap;
+  }
+
+  .step-Connector {
+    display: none;
+  }
+
+  .step-pill {
+    flex: 1;
+    justify-content: center;
+    padding: 0.38rem 0.4rem;
+    font-size: 0.68rem;
+    gap: 0.3rem;
+    text-align: center;
+  }
+
+  .step-num {
+    width: 19px;
+    height: 19px;
+    font-size: 0.66rem;
+    flex-shrink: 0;
+  }
+
+  .card {
+    padding: 1.05rem 0.95rem;
+    border-radius: 16px;
+  }
+
+  .card-header {
+    margin-bottom: 0.85rem;
+    gap: 0.65rem;
+  }
+
+  .card-header h2, .card-header h3 {
+    font-size: 1.32rem;
+  }
+
+  .category-chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 0.25rem;
+  }
+
+  .chip {
+    white-space: nowrap;
+    flex-shrink: 0;
+    padding: 0.45rem 0.9rem;
+    font-size: 0.8rem;
+  }
+
+  .service-item {
+    padding: 0.9rem;
+  }
+
+  .service-top {
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+
+  .service-price {
+    font-size: 1.12rem;
+  }
+
+  /* Horarios cómodos al toque del pulgar */
+  .slots-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.45rem;
+  }
+
+  .slot-btn {
+    min-height: 44px;
+    font-size: 0.88rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .btn {
+    min-height: 46px;
+    font-size: 0.92rem;
+  }
+
+  .btn-sm {
+    min-height: 38px;
+    font-size: 0.8rem;
+  }
+
+  /* Panel de Mamá optimizado en 2x2 para Métricas */
+  .admin-toolbar {
+    padding: 0.9rem;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.7rem;
+  }
+
+  .toolbar-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+  }
+
+  .kpi-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.65rem;
+    margin-bottom: 1rem;
+  }
+
+  .kpi-card {
+    padding: 0.85rem 0.75rem;
+  }
+
+  .kpi-label {
+    font-size: 0.68rem;
+  }
+
+  .kpi-value {
+    font-size: 1.3rem;
+  }
+
+  .admin-filters-bar {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.45rem;
+  }
+
+  .admin-filters-bar select {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .select-sm {
+    width: 100%;
+  }
+
+  /* Chats WhatsApp a ancho completo y cómodos para responder con el pulgar */
+  .chats-inbox-grid {
+    grid-template-columns: 1fr;
+    gap: 0.8rem;
+  }
+
+  .chat-messages-box {
+    max-height: 280px;
+    font-size: 0.86rem;
+  }
+
+  .chat-reply-row {
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+
+  .chat-reply-row button {
+    width: 100%;
+  }
+
+  .admin-list {
+    max-height: none;
+    overflow-y: visible;
+  }
+
+  .admin-item-actions {
+    flex-direction: column;
+  }
+
+  .admin-item-actions .btn {
+    width: 100%;
+  }
+
+  .breakdown-row {
+    font-size: 0.82rem;
+    gap: 0.5rem;
+  }
+
+  .site-footer {
+    padding: 1.15rem 0.85rem 1.5rem;
+    font-size: 0.75rem;
+  }
+
+  /* Banner de cookies encima de la barra inferior móvil */
+  .cookie-banner {
+    bottom: calc(74px + env(safe-area-inset-bottom, 0px));
+    width: 94%;
+    padding: 0.8rem 0.95rem;
+  }
+
+  .cookie-content {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.6rem;
+  }
+
+  .cookie-actions .btn {
+    width: 100%;
+  }
+}

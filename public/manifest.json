@@ -1,0 +1,23 @@
+{
+  "name": "Spa Superlook · Agenda & Administración",
+  "short_name": "Spa Superlook",
+  "description": "Sistema oficial de reservas, pagos Bold y atención WhatsApp de Spa Superlook.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f9fafc",
+  "theme_color": "#9e3363",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/assets/logo-superlook-crest.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/assets/logo-superlook.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

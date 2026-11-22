@@ -364,6 +364,7 @@ async function handleBookingSubmit(event) {
       </p>
     `;
 
+    resultBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     await loadAvailableSlots();
   } catch (err) {
     resultBox.classList.remove('hidden');
@@ -513,6 +514,9 @@ async function checkAndLoadAdminPanel() {
 
     loginCard.classList.add('hidden');
     dashboardContent.classList.remove('hidden');
+    if (window.innerWidth <= 768) {
+      switchAdminSection('turnos');
+    }
     await loadAdminData();
     startAdminChatPolling();
   } catch {
@@ -736,6 +740,35 @@ async function toggleChatBotMode(telefono, pauseBot) {
     await loadAdminChats();
   } catch (err) {
     alert(`Error: ${err.message}`);
+  }
+}
+
+function switchAdminSection(section) {
+  document.querySelectorAll('.admin-subtab').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.section === section);
+  });
+
+  const map = {
+    turnos: document.getElementById('adminSecTurnos'),
+    chats: document.getElementById('adminSecChats'),
+    tickets: document.getElementById('adminSecTickets'),
+    servicios: document.getElementById('adminSecServicios'),
+  };
+  const bottomGrid = document.getElementById('adminSecBottomGrid');
+
+  if (section === 'all') {
+    Object.values(map).forEach((el) => el && el.classList.remove('hidden'));
+    if (bottomGrid) bottomGrid.classList.remove('hidden');
+    return;
+  }
+
+  Object.entries(map).forEach(([key, el]) => {
+    if (!el) return;
+    el.classList.toggle('hidden', key !== section);
+  });
+
+  if (bottomGrid) {
+    bottomGrid.classList.toggle('hidden', section !== 'tickets' && section !== 'servicios');
   }
 }
 

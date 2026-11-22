@@ -2,8 +2,14 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#9e3363" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Spa Superlook" />
   <title>Spa Superlook · Reserva de Citas & Experiencia de Belleza</title>
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="apple-touch-icon" href="/assets/logo-superlook-crest.jpg" />
   <link rel="icon" type="image/svg+xml" href="/assets/logo-superlook.svg" />
   <link rel="stylesheet" href="/styles.css" />
 </head>
@@ -229,8 +235,17 @@
         <!-- 1. Tarjetas de Métricas y Finanzas -->
         <div class="kpi-grid" id="adminKpiGrid"></div>
 
+        <!-- Selector rápido de secciones del Panel de Mamá (ideal para celular) -->
+        <div class="admin-subtabs" role="tablist" aria-label="Secciones del panel de administración">
+          <button type="button" class="admin-subtab active" data-section="all" onclick="switchAdminSection('all')">📋 Todo</button>
+          <button type="button" class="admin-subtab" data-section="turnos" onclick="switchAdminSection('turnos')">🌅 Turnos</button>
+          <button type="button" class="admin-subtab" data-section="chats" onclick="switchAdminSection('chats')">💬 Chats</button>
+          <button type="button" class="admin-subtab" data-section="tickets" onclick="switchAdminSection('tickets')">🎟️ Tickets</button>
+          <button type="button" class="admin-subtab" data-section="servicios" onclick="switchAdminSection('servicios')">✨ Servicios</button>
+        </div>
+
         <!-- 2. Tablero Visual de Turnos / Tickets por Jornada (Mañana, Mediodía, Tarde) -->
-        <div class="card card-blue" style="margin-bottom: 1.35rem;">
+        <div id="adminSecTurnos" class="card card-blue admin-panel-sec" style="margin-bottom: 1.35rem;">
           <div class="card-header">
             <div>
               <h3>🌅 Turnos y Tickets Organizados por Jornada</h3>
@@ -238,7 +253,7 @@
             </div>
             <div class="admin-filters-bar">
               <input type="date" id="adminFilterFecha" class="form-control select-sm" onchange="renderAdminTurnosPorJornada()" title="Filtrar por fecha específica (vacío = todas)" />
-              <button type="button" class="btn btn-secondary btn-sm" onclick="clearAdminDateFilter()">Ver Todas las Fechas</button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="clearAdminDateFilter()">Ver Todas</button>
               <select id="adminFilterEstado" class="form-control select-sm" onchange="renderAdminTurnosPorJornada(); renderAdminCitas();">
                 <option value="TODOS">Todos los estados</option>
                 <option value="CONFIRMADA">✅ Confirmadas (Pagadas)</option>
@@ -254,22 +269,22 @@
         </div>
 
         <!-- 2B. Bandeja de Chats WhatsApp Business en Vivo (+57 312 4597896) -->
-        <div class="card card-pink" style="margin-bottom: 1.35rem;">
+        <div id="adminSecChats" class="card card-pink admin-panel-sec" style="margin-bottom: 1.35rem;">
           <div class="card-header">
             <div>
               <h3>💬 Bandeja de Chats WhatsApp en Vivo (+57 312 4597896)</h3>
               <p class="card-subtitle">Responde directamente desde el WhatsApp oficial de Spa Superlook o pausa el Bot para hablar personalmente</p>
             </div>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="loadAdminChats()">🔄 Refrescar Chats</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="loadAdminChats()">🔄 Refrescar</button>
           </div>
           <div id="adminChatsContainer" class="chats-inbox-grid">
             <div class="empty-state">Aún no hay conversaciones registradas en el WhatsApp Business.</div>
           </div>
         </div>
 
-        <div class="grid-two-cols">
+        <div class="grid-two-cols" id="adminSecBottomGrid">
           <!-- 3. Historial Completo de Tickets y Reembolsos -->
-          <div class="card card-blue">
+          <div id="adminSecTickets" class="card card-blue admin-panel-sec">
             <div class="card-header">
               <div>
                 <h3>🎟️ Todos los Tickets y Gestión de Reembolsos (80%)</h3>
@@ -280,7 +295,7 @@
           </div>
 
           <!-- 4. Editor del Catálogo de Servicios por Categoría -->
-          <div class="card card-pink">
+          <div id="adminSecServicios" class="card card-pink admin-panel-sec">
             <div class="card-header">
               <div>
                 <h3>✨ Catálogo de Servicios y Precios</h3>
