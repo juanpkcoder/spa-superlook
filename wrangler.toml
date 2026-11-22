@@ -11,7 +11,7 @@ run_worker_first = ["/api/*", "/webhooks/*"]
 
 # Variables públicas del entorno (NUNCA colocar llaves privadas aquí)
 [vars]
-DASHBOARD_URL = "http://localhost:3000"
+DASHBOARD_URL = "https://spa-superlook.vercel.app"
 ADMIN_PHONE = "573102319617"
 WOMPI_BASE_URL = "https://sandbox.wompi.co/v1"
 
