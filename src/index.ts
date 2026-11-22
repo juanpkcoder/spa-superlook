@@ -14,30 +14,117 @@ import { isValidAdminRequest, timingSafeEqualStr } from './services/security';
 
 export const app = new Hono<{ Bindings: Env }>();
 
-// Middleware híbrido Cloudflare Workers (D1) + Vercel (Supabase PostgreSQL)
-app.use('*', async (c, next) => {
-  const globalProc = (globalThis as unknown as { process?: { env?: Record<string, string> } })
-    .process;
-  const procEnv = globalProc?.env || {};
-  const mergedEnv = Object.assign(
-    {
-      DASHBOARD_URL: procEnv.DASHBOARD_URL || 'http://localhost:3000',
-      ADMIN_PHONE: procEnv.ADMIN_PHONE || '573102319617',
-      WOMPI_BASE_URL: procEnv.WOMPI_BASE_URL || 'https://sandbox.wompi.co/v1',
-    },
-    procEnv,
-    c.env || {}
-  ) as Env;
+function readMergedEnv(cfEnv: Partial<Env> | undefined): Env {
+  const hasProc = typeof process !== 'undefined' && typeof process.env === 'object' && process.env !== null;
+  const pick = (cfVal: string | undefined, procVal: string | undefined, fallback = ''): string => {
+    const a = (cfVal || '').trim();
+    if (a) return a;
+    const b = (procVal || '').trim();
+    if (b) return b;
+    return fallback;
+  };
 
-  if (!mergedEnv.DB && mergedEnv.SUPABASE_URL && mergedEnv.SUPABASE_SERVICE_ROLE_KEY) {
-    mergedEnv.DB = createSupabaseD1Adapter(
-      mergedEnv.SUPABASE_URL,
-      mergedEnv.SUPABASE_SERVICE_ROLE_KEY
+  const merged: Env = {
+    DB: cfEnv?.DB as D1Database,
+    BUCKET: cfEnv?.BUCKET,
+    ASSETS: cfEnv?.ASSETS,
+    DASHBOARD_URL: pick(
+      cfEnv?.DASHBOARD_URL,
+      hasProc ? process.env.DASHBOARD_URL : undefined,
+      'https://spa-superlook.vercel.app'
+    ),
+    ADMIN_PHONE: pick(
+      cfEnv?.ADMIN_PHONE,
+      hasProc ? process.env.ADMIN_PHONE : undefined,
+      '573102319617'
+    ),
+    WOMPI_BASE_URL: pick(
+      cfEnv?.WOMPI_BASE_URL,
+      hasProc ? process.env.WOMPI_BASE_URL : undefined,
+      'https://sandbox.wompi.co/v1'
+    ),
+    SUPABASE_URL: pick(cfEnv?.SUPABASE_URL, hasProc ? process.env.SUPABASE_URL : undefined),
+    SUPABASE_SERVICE_ROLE_KEY: pick(
+      cfEnv?.SUPABASE_SERVICE_ROLE_KEY,
+      hasProc ? process.env.SUPABASE_SERVICE_ROLE_KEY : undefined
+    ),
+    CRON_SECRET: pick(cfEnv?.CRON_SECRET, hasProc ? process.env.CRON_SECRET : undefined),
+    ADMIN_DASHBOARD_SECRET: pick(
+      cfEnv?.ADMIN_DASHBOARD_SECRET,
+      hasProc ? process.env.ADMIN_DASHBOARD_SECRET : undefined
+    ),
+    WOMPI_PUBLIC_KEY: pick(
+      cfEnv?.WOMPI_PUBLIC_KEY,
+      hasProc ? process.env.WOMPI_PUBLIC_KEY : undefined
+    ),
+    WOMPI_PRIVATE_KEY: pick(
+      cfEnv?.WOMPI_PRIVATE_KEY,
+      hasProc ? process.env.WOMPI_PRIVATE_KEY : undefined
+    ),
+    WOMPI_EVENTS_SECRET: pick(
+      cfEnv?.WOMPI_EVENTS_SECRET,
+      hasProc ? process.env.WOMPI_EVENTS_SECRET : undefined
+    ),
+    WOMPI_INTEGRITY_SECRET: pick(
+      cfEnv?.WOMPI_INTEGRITY_SECRET,
+      hasProc ? process.env.WOMPI_INTEGRITY_SECRET : undefined
+    ),
+    BOLD_IDENTITY_KEY: pick(
+      cfEnv?.BOLD_IDENTITY_KEY,
+      hasProc ? process.env.BOLD_IDENTITY_KEY : undefined
+    ),
+    BOLD_SECRET_KEY: pick(
+      cfEnv?.BOLD_SECRET_KEY,
+      hasProc ? process.env.BOLD_SECRET_KEY : undefined
+    ),
+    WHATSAPP_PHONE_NUMBER_ID: pick(
+      cfEnv?.WHATSAPP_PHONE_NUMBER_ID,
+      hasProc ? process.env.WHATSAPP_PHONE_NUMBER_ID : undefined
+    ),
+    WHATSAPP_ACCESS_TOKEN: pick(
+      cfEnv?.WHATSAPP_ACCESS_TOKEN,
+      hasProc ? process.env.WHATSAPP_ACCESS_TOKEN : undefined
+    ),
+    WHATSAPP_VERIFY_TOKEN: pick(
+      cfEnv?.WHATSAPP_VERIFY_TOKEN,
+      hasProc ? process.env.WHATSAPP_VERIFY_TOKEN : undefined
+    ),
+    META_APP_SECRET: pick(
+      cfEnv?.META_APP_SECRET,
+      hasProc ? process.env.META_APP_SECRET : undefined
+    ),
+    GEMINI_API_KEY: pick(
+      cfEnv?.GEMINI_API_KEY,
+      hasProc ? process.env.GEMINI_API_KEY : undefined
+    ),
+  };
+
+  if (!merged.DB && merged.SUPABASE_URL && merged.SUPABASE_SERVICE_ROLE_KEY) {
+    merged.DB = createSupabaseD1Adapter(
+      merged.SUPABASE_URL,
+      merged.SUPABASE_SERVICE_ROLE_KEY
     );
   }
 
-  c.env = mergedEnv;
+  return merged;
+}
+
+// Middleware híbrido Cloudflare Workers (D1) + Vercel Edge/Node (Supabase PostgreSQL)
+app.use('*', async (c, next) => {
+  c.env = readMergedEnv(c.env);
   await next();
+});
+
+// Manejo centralizado de errores en JSON limpio
+app.onError((err, c) => {
+  console.error('Unhandled error in Spa Superlook API:', err);
+  return c.json(
+    {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Error interno del servidor',
+    },
+    500
+  );
 });
 
 // Configurar CORS restringido únicamente a env.DASHBOARD_URL (y localhost solo en desarrollo)
@@ -45,7 +132,7 @@ app.use(
   '/api/*',
   cors({
     origin: (requestOrigin, c) => {
-      const configuredUrl = (c.env.DASHBOARD_URL || 'http://localhost:3000').replace(/\/$/, '');
+      const configuredUrl = (c.env.DASHBOARD_URL || 'https://spa-superlook.vercel.app').replace(/\/$/, '');
       if (!requestOrigin) {
         return configuredUrl;
       }
@@ -81,6 +168,8 @@ app.get('/api/info', (c) => {
     politica_cancelacion: TEXTO_LEGAL_RETENCION_20,
     retencion_porcentaje: 20,
     reembolso_porcentaje: 80,
+    db_connected: Boolean(c.env.DB),
+    whatsapp_configured: Boolean(c.env.WHATSAPP_PHONE_NUMBER_ID && c.env.WHATSAPP_ACCESS_TOKEN),
   });
 });
 
@@ -109,7 +198,7 @@ app.get('/api/cron/reminders', async (c) => {
 // Rutas de API para el Frontend / Dashboard
 app.route('/api', apiRoutes);
 
-// Rutas de Webhooks para Wompi y Meta WhatsApp Cloud API
+// Rutas de Webhooks para Wompi, Bold y Meta WhatsApp Cloud API
 app.route('/webhooks', webhookRoutes);
 
 // Fallback: Si el binding de ASSETS está disponible, sirve el Dashboard; de lo contrario, JSON de estado
@@ -135,6 +224,6 @@ export default {
     env: Env,
     ctx: ExecutionContext
   ): Promise<void> {
-    ctx.waitUntil(processScheduledReminders(env));
+    ctx.waitUntil(processScheduledReminders(readMergedEnv(env)));
   },
 };
