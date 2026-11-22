@@ -199,7 +199,8 @@ webhookRoutes.post('/bold', async (c) => {
   const isValidSignature = await verifyBoldWebhookSignature(
     rawBody,
     signatureHeader,
-    c.env.BOLD_SECRET_KEY
+    c.env.BOLD_SECRET_KEY,
+    c.env.BOLD_IDENTITY_KEY
   );
 
   if (!isValidSignature) {
@@ -218,6 +219,7 @@ webhookRoutes.post('/bold', async (c) => {
 
   const reference =
     payload.data?.metadata?.reference ||
+    payload.data?.payment_link ||
     payload.data?.reference ||
     payload.subject ||
     '';

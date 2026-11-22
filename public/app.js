@@ -336,24 +336,27 @@ async function handleBookingSubmit(event) {
     const cita = data.cita;
     const manageUrl = data.cita_manage_url;
     const token = data.cita_access_token;
+    const gatewayLabel = data.gateway === 'WOMPI' ? 'Wompi' : 'Bold';
+    const stepPago = document.getElementById('stepPillPago');
+    if (stepPago) stepPago.classList.add('active');
 
     resultBox.classList.remove('hidden');
     resultBox.innerHTML = `
-      <h3 style="margin-bottom:0.4rem">✅ ¡Reserva Previa Creada (Pendiente de Pago)!</h3>
-      <p style="margin-bottom:0.65rem">Tu horario ha sido bloqueado por <strong>20 minutos</strong>. Completa tu pago del 100% en Wompi para confirmar tu cita en <strong>Spa Superlook</strong>.</p>
+      <h3 style="margin-bottom:0.4rem">✅ ¡Ticket de Reserva Creado Automáticamente!</h3>
+      <p style="margin-bottom:0.65rem">Tu turno ha sido bloqueado por <strong>20 minutos</strong> y también enviamos el enlace a tu WhatsApp. Completa tu pago del 100% en <strong>${escapeHtml(gatewayLabel)}</strong> para confirmar tu cita en <strong>Spa Superlook</strong>.</p>
       <div style="margin-bottom:0.75rem; font-size:0.83rem;">
         <div>• <strong>Servicio:</strong> ${escapeHtml(cita.servicio_nombre)}</div>
         <div>• <strong>Fecha/Hora:</strong> ${escapeHtml(formatDateTimeLocal(cita.fecha_hora_inicio))}</div>
-        <div>• <strong>Referencia Wompi:</strong> <code>${escapeHtml(cita.wompi_reference)}</code></div>
+        <div>• <strong>Referencia ${escapeHtml(gatewayLabel)}:</strong> <code>${escapeHtml(cita.wompi_reference)}</code></div>
         <div>• <strong>Total a pagar (100%):</strong> ${formatCOP(cita.monto_total)}</div>
         <div>• <strong>Reembolso 80% si cancelas:</strong> ${formatCOP(cita.monto_reembolso_80)} (Retención 20%: ${formatCOP(cita.monto_retencion_20)})</div>
       </div>
       <div style="display:flex; gap:0.6rem; flex-wrap:wrap;">
-        <a href="${escapeHtml(data.payment_link)}" target="_blank" rel="noopener" class="btn btn-primary">
-          💳 Pagar Ahora en Wompi (${formatCOP(cita.monto_total)})
+        <a href="${escapeHtml(data.payment_link)}" target="_blank" rel="noopener" class="btn btn-primary btn-animated">
+          💳 Pagar Ahora en ${escapeHtml(gatewayLabel)} (${formatCOP(cita.monto_total)})
         </a>
         <button type="button" class="btn btn-secondary" onclick="openPrivateCitaView('${escapeHtml(cita.id)}', '${escapeHtml(token)}')">
-          🎟️ Ver / Gestionar Mi Reserva Privada
+          🎟️ Ver / Gestionar Mi Ticket Privado
         </button>
       </div>
       <p style="margin-top:0.65rem; font-size:0.77rem; color:#383e4c;">

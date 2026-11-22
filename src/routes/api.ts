@@ -317,8 +317,10 @@ apiRoutes.post('/reservas', async (c) => {
 
   const preferredGateway =
     (body.metodo_pago || '').toUpperCase() === 'BOLD' ||
-    (!c.env.WOMPI_PUBLIC_KEY && Boolean(c.env.BOLD_IDENTITY_KEY))
-      ? 'BOLD'
+    Boolean(c.env.BOLD_IDENTITY_KEY)
+      ? (body.metodo_pago || '').toUpperCase() === 'WOMPI' && Boolean(c.env.WOMPI_PUBLIC_KEY)
+        ? 'WOMPI'
+        : 'BOLD'
       : 'WOMPI';
 
   const payment =
@@ -340,10 +342,35 @@ apiRoutes.post('/reservas', async (c) => {
           redirectUrl: citaManageUrl,
         });
 
+  const finalReference = payment.reference || wompiReference;
+
+  // Si Bold generó su propio ID de link (LNK_...), sincronizarlo en la cita para que el Webhook haga match exacto
+  if (finalReference !== wompiReference || preferredGateway !== (body.metodo_pago || 'WOMPI')) {
+    await c.env.DB.prepare(
+      `UPDATE citas SET wompi_reference = ?1, metodo_pago = ?2 WHERE id = ?3`
+    )
+      .bind(finalReference, preferredGateway, citaId)
+      .run();
+  }
+
+  // Enviar por WhatsApp el link de pago automático y el ticket privado de la clienta
+  const pendingMsg =
+    `🎟️ *${NOMBRE_OFICIAL_NEGOCIO} - Tu Ticket de Reserva está listo*\n\n` +
+    `Hola *${clienteNombre}*, bloqueamos tu turno por *20 minutos*:\n` +
+    `• *Servicio:* ${servicio.nombre}\n` +
+    `• *Fecha/Hora:* ${fechaHoraInicio}\n` +
+    `• *Total a pagar (100%):* ${formatCOP(precio)}\n\n` +
+    `💳 *Paga aquí de forma segura (${preferredGateway}):*\n${payment.paymentUrl}\n\n` +
+    `🔒 *Consulta o gestiona tu ticket privado:*\n${citaManageUrl}\n\n` +
+    `📌 ${TEXTO_LEGAL_RETENCION_20} (Reembolso 80%: ${formatCOP(montoReembolso80)}).`;
+
+  sendWhatsAppText(c.env, clienteTelefono, pendingMsg).catch(() => {});
+
   return c.json(
     {
       ok: true,
       negocio: NOMBRE_OFICIAL_NEGOCIO,
+      gateway: preferredGateway,
       cita: {
         id: citaId,
         cliente_nombre: clienteNombre,
@@ -357,11 +384,11 @@ apiRoutes.post('/reservas', async (c) => {
         monto_total: precio,
         monto_retencion_20: montoRetencion20,
         monto_reembolso_80: montoReembolso80,
-        wompi_reference: wompiReference,
+        wompi_reference: finalReference,
         created_at: createdAt,
       },
       payment_link: payment.paymentUrl,
-      wompi_reference: payment.reference,
+      wompi_reference: finalReference,
       integrity_signature: payment.integritySignature,
       cita_access_token: citaAccessToken,
       cita_manage_url: citaManageUrl,

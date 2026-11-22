@@ -9,6 +9,7 @@ export interface BoldWebhookEvent {
   time?: number;
   data?: {
     payment_id?: string;
+    payment_link?: string;
     reference?: string;
     amount?: { total?: number; currency?: string };
     metadata?: { reference?: string };
@@ -32,7 +33,9 @@ export async function generateBoldIntegritySignature(
 }
 
 /**
- * Crea un Link de Pago en Bold (vía API de Links de Pago o URL de Checkout con firma de integridad).
+ * Crea un Link de Pago automático en Bold vía API oficial (`POST /online/link/v1`).
+ * Devuelve la URL oficial de checkout de Bold (`https://checkout.bold.co/payment/LNK_...`)
+ * y el `payment_link` (`LNK_...`) que Bold enviará luego en `metadata.reference` del Webhook.
  */
 export async function createBoldPaymentLink(
   env: Env,
@@ -40,7 +43,7 @@ export async function createBoldPaymentLink(
 ): Promise<CreatePaymentLinkResult> {
   const amountCop = Math.round(params.amountCop);
   const currency = 'COP';
-  const identityKey = (env.BOLD_IDENTITY_KEY || '').trim() || 'bold_pk_test_placeholder';
+  const identityKey = (env.BOLD_IDENTITY_KEY || '').trim();
   const secretKey = (env.BOLD_SECRET_KEY || '').trim() || 'bold_sk_test_placeholder';
 
   const integritySignature = await generateBoldIntegritySignature(
@@ -50,9 +53,10 @@ export async function createBoldPaymentLink(
     secretKey
   );
 
-  // 1. Intentar crear Link de Pago vía API oficial de Bold si BOLD_IDENTITY_KEY está configurada
-  if (env.BOLD_IDENTITY_KEY && !env.BOLD_IDENTITY_KEY.includes('placeholder')) {
+  // 1. Crear Link de Pago automático vía API oficial de Bold
+  if (identityKey && !identityKey.includes('placeholder')) {
     try {
+      const cleanDesc = `Spa Superlook: ${params.serviceName} - ${params.customerName}`.slice(0, 95);
       const response = await fetch('https://integrations.api.bold.co/online/link/v1', {
         method: 'POST',
         headers: {
@@ -64,9 +68,9 @@ export async function createBoldPaymentLink(
           amount: {
             currency,
             total_amount: amountCop,
+            tip_amount: 0,
           },
-          reference: params.reference,
-          description: `Reserva Spa Superlook: ${params.serviceName} - ${params.customerName} (${params.reference})`,
+          description: cleanDesc,
           callback_url: params.redirectUrl,
         }),
       });
@@ -76,27 +80,31 @@ export async function createBoldPaymentLink(
           payload?: { payment_link?: string; url?: string };
         };
         if (json?.payload?.url) {
+          const boldLinkId = json.payload.payment_link || params.reference;
           return {
             paymentUrl: json.payload.url,
-            reference: params.reference,
+            reference: boldLinkId,
             amountInCents: amountCop * 100,
             integritySignature,
           };
         }
+      } else {
+        const errBody = await response.text();
+        console.error(`Bold API /online/link/v1 error (${response.status}):`, errBody);
       }
-    } catch {
-      // Fallback a URL de Checkout Bold firmada
+    } catch (err) {
+      console.error('Bold API network error:', err);
     }
   }
 
-  // 2. Fallback a URL de Checkout de Bold con parámetros firmados
+  // 2. Fallback a URL de Checkout de Bold con firma de integridad SHA-256
   const query = new URLSearchParams({
-    'api-key': identityKey,
+    'api-key': identityKey || 'bold_pk_test_placeholder',
     'order-id': params.reference,
     amount: String(amountCop),
     currency,
     'integrity-signature': integritySignature,
-    description: `Reserva Spa Superlook: ${params.serviceName}`,
+    description: `Reserva Spa Superlook: ${params.serviceName}`.slice(0, 95),
     'redirection-url': params.redirectUrl,
   });
 
@@ -122,24 +130,37 @@ function utf8ToBase64(str: string): string {
 
 /**
  * Verifica la firma `x-bold-signature` de un webhook de Bold:
- * HMAC-SHA256(key = BOLD_SECRET_KEY, message = base64(rawBody)) en hexadecimal.
+ * HMAC-SHA256(key = BOLD_SECRET_KEY o BOLD_IDENTITY_KEY, message = base64(rawBody)) en hexadecimal.
  */
 export async function verifyBoldWebhookSignature(
   rawBody: string,
   signatureHeader: string | null | undefined,
-  boldSecretKey: string | undefined
+  boldSecretKey: string | undefined,
+  boldIdentityKey?: string | undefined
 ): Promise<boolean> {
-  if (!boldSecretKey || !signatureHeader) {
+  if (!signatureHeader) {
     return false;
   }
   const cleanSignature = signatureHeader.trim().toLowerCase();
   const base64Body = utf8ToBase64(rawBody);
-  const expectedHex = (await hmacSha256Hex(boldSecretKey.trim(), base64Body)).toLowerCase();
+  const candidateSecrets = [boldSecretKey, boldIdentityKey]
+    .map((s) => (s || '').trim())
+    .filter((s) => s.length > 0);
 
-  // También soportar firma sobre rawBody directo por compatibilidad entre versiones de Bold
-  if (timingSafeEqualStr(expectedHex, cleanSignature)) {
-    return true;
+  if (candidateSecrets.length === 0) {
+    return false;
   }
-  const directHex = (await hmacSha256Hex(boldSecretKey.trim(), rawBody)).toLowerCase();
-  return timingSafeEqualStr(directHex, cleanSignature);
+
+  for (const secret of candidateSecrets) {
+    const expectedBase64Hex = (await hmacSha256Hex(secret, base64Body)).toLowerCase();
+    if (timingSafeEqualStr(expectedBase64Hex, cleanSignature)) {
+      return true;
+    }
+    const directHex = (await hmacSha256Hex(secret, rawBody)).toLowerCase();
+    if (timingSafeEqualStr(directHex, cleanSignature)) {
+      return true;
+    }
+  }
+
+  return false;
 }

@@ -255,7 +255,7 @@ async function executeBotTool(
     // REQUISITO 3C: Enlace privado firmado con token HMAC exclusivo para esta cita
     const { url: linkGestionCita } = await buildClientCitaUrl(env, citaId);
 
-    const useBold = Boolean(env.BOLD_IDENTITY_KEY) && !env.WOMPI_PUBLIC_KEY;
+    const useBold = Boolean(env.BOLD_IDENTITY_KEY);
     const paymentLink = useBold
       ? await createBoldPaymentLink(env, {
           reference: wompiReference,
@@ -274,16 +274,26 @@ async function executeBotTool(
           redirectUrl: linkGestionCita,
         });
 
+    const finalReference = paymentLink.reference || wompiReference;
+    if (finalReference !== wompiReference || useBold) {
+      await env.DB.prepare(
+        `UPDATE citas SET wompi_reference = ?1, metodo_pago = ?2 WHERE id = ?3`
+      )
+        .bind(finalReference, useBold ? 'BOLD' : 'WOMPI', citaId)
+        .run();
+    }
+
     return {
       ok: true,
       negocio: NOMBRE_OFICIAL_NEGOCIO,
+      pasarela: useBold ? 'Bold' : 'Wompi',
       cita_id: citaId,
       servicio: servicio.nombre,
       fecha_hora_inicio: fechaHoraInicioIso,
       monto_total: formatCOP(montoTotal),
       monto_retencion_20: formatCOP(montoRetencion20),
       monto_reembolso_80: formatCOP(montoReembolso80),
-      wompi_reference: wompiReference,
+      wompi_reference: finalReference,
       payment_link: paymentLink.paymentUrl,
       link_gestion_cita: linkGestionCita,
       texto_legal: TEXTO_LEGAL_RETENCION_20,
@@ -345,9 +355,9 @@ Fecha actual de referencia (Colombia UTC-5): ${todayBogota}.
 DATOS Y REGLAS OBLIGATORIAS DEL NEGOCIO:
 1. Nombre oficial: ${NOMBRE_OFICIAL_NEGOCIO}.
 2. Modalidad de atención: Atendemos ÚNICAMENTE bajo reserva previa confirmada. NO trabajamos con horario fijo de atención al público sin cita; la disponibilidad depende exclusivamente de los espacios libres respecto a las citas ya reservadas en el sistema dentro de nuestra franja operativa de agendamiento. Si una clienta pregunta por el horario de atención o si puede ir sin cita, explícale amablemente que atendemos únicamente con reserva previa y ofrécele consultar los bloques disponibles para el día que desee.
-3. Pago anticipado y bloqueo: Toda reserva requiere el pago anticipado del 100% mediante el link seguro de Wompi. Al crear la reserva en estado PENDIENTE_PAGO, el horario se bloquea por 20 minutos para que complete el pago.
+3. Pago anticipado y bloqueo: Toda reserva requiere el pago anticipado del 100% mediante el link seguro de pago en línea (Bold / Wompi) que generas automáticamente con \`crear_reserva_con_pago\`. Al crear la reserva en estado PENDIENTE_PAGO, el horario se bloquea por 20 minutos para que complete el pago.
 4. Política obligatoria de cancelación (DEBES informarla siempre al cotizar o crear una reserva): En caso de cancelación, ${NOMBRE_OFICIAL_NEGOCIO} reembolsa el 80% del valor pagado y retiene el 20% por gastos administrativos y reserva de agenda (${TEXTO_LEGAL_RETENCION_20}).
-5. Enlace seguro de la cita: Cuando ejecutes \`crear_reserva_con_pago\`, entrégale siempre a la clienta tanto el \`payment_link\` de Wompi como su enlace privado firmado \`link_gestion_cita\` para que pueda ver el estado o cancelar únicamente su reserva.
+5. Enlace seguro de la cita: Cuando ejecutes \`crear_reserva_con_pago\`, entrégale siempre a la clienta tanto el \`payment_link\` automático de Bold/Wompi como su enlace privado firmado \`link_gestion_cita\` para que pueda ver el estado o cancelar únicamente su reserva.
 6. Responde siempre en español cálido, profesional, claro y conciso para WhatsApp.`;
 
       const toolsDeclaration = [
