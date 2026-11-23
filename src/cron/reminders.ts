@@ -39,6 +39,9 @@ function detectMaintenanceCadence(
     haystack.includes('manicur') ||
     haystack.includes('pedicur') ||
     haystack.includes('acrilic') ||
+    haystack.includes('poligel') ||
+    haystack.includes('soft gel') ||
+    haystack.includes('press') ||
     haystack.includes('semipermanente') ||
     haystack.includes('nail')
   ) {
@@ -50,7 +53,13 @@ function detectMaintenanceCadence(
     haystack.includes('capilar') ||
     haystack.includes('color') ||
     haystack.includes('balayage') ||
+    haystack.includes('babylight') ||
+    haystack.includes('iluminacion') ||
+    haystack.includes('rayito') ||
     haystack.includes('keratina') ||
+    haystack.includes('cirugia') ||
+    haystack.includes('laminado') ||
+    haystack.includes('ampolleta') ||
     haystack.includes('alisado') ||
     haystack.includes('tinte') ||
     haystack.includes('tintura') ||

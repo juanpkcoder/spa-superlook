@@ -242,11 +242,26 @@
         <!-- Selector rápido de secciones del Panel de Mamá (ideal para celular) -->
         <div class="admin-subtabs" role="tablist" aria-label="Secciones del panel de administración">
           <button type="button" class="admin-subtab active" data-section="all" onclick="switchAdminSection('all')">📋 Todo</button>
+          <button type="button" class="admin-subtab" data-section="cotizaciones" onclick="switchAdminSection('cotizaciones')">📸 Cotizaciones <span id="adminQuotesPendingBadge"></span></button>
           <button type="button" class="admin-subtab" data-section="turnos" onclick="switchAdminSection('turnos')">🌅 Turnos</button>
           <button type="button" class="admin-subtab" data-section="caja" onclick="switchAdminSection('caja')">💵 Ingreso / QR</button>
           <button type="button" class="admin-subtab" data-section="chats" onclick="switchAdminSection('chats')">💬 Chats</button>
           <button type="button" class="admin-subtab" data-section="tickets" onclick="switchAdminSection('tickets')">🎟️ Tickets</button>
           <button type="button" class="admin-subtab" data-section="servicios" onclick="switchAdminSection('servicios')">✨ Servicios</button>
+        </div>
+
+        <!-- 1B2. Cotizaciones de Fotos / Diseños para Aprobar o Ajustar Precio -->
+        <div id="adminSecCotizaciones" class="card card-blue admin-panel-sec" style="margin-bottom: 1.35rem;">
+          <div class="card-header">
+            <div>
+              <h3>📸 Cotizaciones por Aprobar (Fotos Uñas / Cabello)</h3>
+              <p class="card-subtitle">También puedes aprobar directo desde tu WhatsApp respondiendo <code>APROBAR COT-101</code> o <code>PRECIO COT-101 85000</code></p>
+            </div>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="loadAdminQuotes()">🔄 Refrescar</button>
+          </div>
+          <div id="adminQuotesContainer" class="admin-list">
+            <div class="empty-state">Aún no hay cotizaciones pendientes por revisar.</div>
+          </div>
         </div>
 
         <!-- 1C. Registro Manual de Cita e Ingreso (Efectivo / Código QR / Transferencia / WhatsApp Personal) -->
@@ -485,12 +500,11 @@
           <div class="form-group">
             <label for="quoteCategoria">¿Qué deseas cotizar?</label>
             <select id="quoteCategoria" class="form-control" required>
-              <option value="Uñas & Nail Art">💅 Diseño de Uñas (Acrílicas / Semipermanente / Nail Art)</option>
-              <option value="Cabello & Colorimetría">💇‍♀️ Cabello & Colorimetría (Balayage / Tintura / Iluminación)</option>
-              <option value="Alisados & Keratina">✨ Keratina / Alisado / Tratamiento Capilar</option>
-              <option value="Cejas & Pestañas">👁️ Cejas HD / Laminado / Lifting de Pestañas</option>
-              <option value="Facial & Spa">🧖‍♀️ Facial / Limpieza / Spa</option>
-              <option value="Maquillaje & Peinado">💄 Maquillaje & Peinado Social / Eventos</option>
+              <option value="Uñas & Manicure">💅 Uñas & Manicure (Semipermanente / Acrílico / Press-On / Poligel)</option>
+              <option value="Pedicure & Spa Pies">🦶 Pedicure & Spa Pies (Tradicional / Semipermanente)</option>
+              <option value="Tratamientos Capilares">✨ Tratamientos Capilares (Keratina / Cirugía / Laminado)</option>
+              <option value="Cabello, Corte & Color">💇‍♀️ Cabello, Corte & Color (Balayage / Babylights / Mechas / Color)</option>
+              <option value="Pestañas & Mirada">👁️ Pestañas & Mirada (Pelo a Pelo / 3D / Punto a Punto / Tira)</option>
             </select>
           </div>
           <div class="form-row">

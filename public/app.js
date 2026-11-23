@@ -14,6 +14,7 @@ const state = {
   adminCitas: [],
   adminServicios: [],
   adminChats: [],
+  adminQuotes: [],
   lastAdminChatsHash: '',
   chatPollingTimer: null,
   webChatHistory: [],
@@ -389,7 +390,7 @@ async function handleBookingSubmit(event) {
     resultBox.innerHTML = `<div class="alert-error">${escapeHtml(err.message)}</div>`;
   } finally {
     submitBtn.disabled = false;
-    submitBtn.textContent = '💳 Generar Reserva y Link de Pago Wompi';
+    submitBtn.textContent = '✨ Confirmar Turno y Ir al Pago';
   }
 }
 
@@ -631,9 +632,141 @@ async function loadAdminData() {
     renderAdminTurnosPorJornada();
     renderAdminCitas();
     renderAdminServices();
-    await Promise.all([loadPublicServices(), loadAdminChats()]);
+    await Promise.all([loadPublicServices(), loadAdminChats(), loadAdminQuotes()]);
   } catch (err) {
     console.error('Error cargando datos admin:', err);
+  }
+}
+
+// ============================================================================
+// 4A. COTIZACIONES DE FOTOS / DISEÑOS PARA APROBAR O AJUSTAR PRECIO (MAMÁ)
+// ============================================================================
+async function loadAdminQuotes() {
+  if (!state.adminToken) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/cotizaciones`, {
+      headers: { Authorization: `Bearer ${state.adminToken}` },
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    state.adminQuotes = data.cotizaciones || [];
+    renderAdminQuotes();
+  } catch (err) {
+    console.error('Error cargando cotizaciones:', err);
+  }
+}
+
+function renderAdminQuotes() {
+  const container = document.getElementById('adminQuotesContainer');
+  const badge = document.getElementById('adminQuotesPendingBadge');
+  if (!container) return;
+
+  const pendingCount = state.adminQuotes.filter((q) => q.estado === 'PENDIENTE').length;
+  if (badge) {
+    badge.textContent = pendingCount > 0 ? `(${pendingCount})` : '';
+  }
+
+  if (state.adminQuotes.length === 0) {
+    container.innerHTML = `<div class="empty-state">Aún no hay cotizaciones registradas. Cuando una clienta envíe una foto o pida cotizar un diseño, aparecerá aquí y en tu WhatsApp personal.</div>`;
+    return;
+  }
+
+  container.innerHTML = state.adminQuotes
+    .slice(0, 20)
+    .map((q) => {
+      const safeCode = escapeHtml(q.code);
+      const isPending = q.estado === 'PENDIENTE';
+      const defaultPrice = q.precio_aprobado_cop || q.estimado_cop || '';
+      const statusBadgeCls =
+        q.estado === 'APROBADA'
+          ? 'status-CONFIRMADA'
+          : q.estado === 'RECHAZADA'
+            ? 'status-CANCELADA'
+            : 'status-PENDIENTE_PAGO';
+
+      return `
+        <div class="admin-item">
+          <div class="admin-item-header">
+            <div>
+              <strong>${safeCode} · ${escapeHtml(q.cliente_nombre)}</strong>
+              <span style="font-size:0.78rem; color:#667085;"> (+${escapeHtml(q.cliente_telefono || 'Sin tel')})</span>
+            </div>
+            <span class="status-badge ${statusBadgeCls}">${escapeHtml(q.estado)}</span>
+          </div>
+          <div style="font-size:0.84rem; margin-top:0.25rem;">
+            <strong>${escapeHtml(q.categoria)}</strong>${q.servicio_nombre ? ` · ${escapeHtml(q.servicio_nombre)}` : ''} ${q.media_id ? '· 📸 Con foto en WhatsApp' : ''}
+          </div>
+          <div style="font-size:0.82rem; color:#383e4c; margin-top:0.2rem;">${escapeHtml(q.descripcion_diseno)}</div>
+          ${q.analisis_ia ? `<div style="font-size:0.78rem; color:#667085; margin-top:0.15rem;">🤖 IA: ${escapeHtml(q.analisis_ia)}</div>` : ''}
+          <div style="font-size:0.78rem; margin-top:0.25rem; color:#505868;">
+            Sugerido Bot: <strong>${q.estimado_cop ? formatCOP(q.estimado_cop) : escapeHtml(q.estimado_rango || 'A valorar')}</strong>
+            ${q.precio_aprobado_cop ? ` · Aprobado Mamá: <strong style="color:#16794b;">${formatCOP(q.precio_aprobado_cop)}</strong>` : ''}
+            ${q.fecha_tentativa ? ` · 🗓️ ${escapeHtml(q.fecha_tentativa)}` : ''}
+          </div>
+          ${
+            isPending
+              ? `
+                <div class="form-row" style="margin-top:0.55rem; gap:0.5rem;">
+                  <input type="number" id="quotePrice_${safeCode}" class="form-control" min="5000" step="1000" value="${escapeHtml(defaultPrice)}" placeholder="Precio exacto COP (ej: 85000)" />
+                  <input type="text" id="quoteNote_${safeCode}" class="form-control" placeholder="Nota opcional (ej: incluye retiro)" />
+                </div>
+                <div class="admin-item-actions" style="margin-top:0.5rem;">
+                  <button type="button" class="btn btn-success btn-sm" onclick="handleResolveQuote('${safeCode}', 'PRECIO')">✅ Aprobar Precio y Avisar Clienta</button>
+                  <button type="button" class="btn btn-danger-outline btn-sm" onclick="handleResolveQuote('${safeCode}', 'RECHAZAR')">❌ Rechazar</button>
+                </div>
+              `
+              : q.nota_mama
+                ? `<div style="font-size:0.77rem; color:#667085; margin-top:0.25rem;">💬 Nota: ${escapeHtml(q.nota_mama)}</div>`
+                : ''
+          }
+        </div>
+      `;
+    })
+    .join('');
+}
+
+async function handleResolveQuote(code, action) {
+  const priceInput = document.getElementById(`quotePrice_${code}`);
+  const noteInput = document.getElementById(`quoteNote_${code}`);
+  const precio = priceInput ? Number(priceInput.value) : 0;
+  const nota = noteInput ? noteInput.value.trim() : '';
+
+  if (action !== 'RECHAZAR' && (!precio || precio < 5000)) {
+    alert('Ingresa un valor válido en pesos colombianos (ej. 85000).');
+    return;
+  }
+
+  const confirmMsg =
+    action === 'RECHAZAR'
+      ? `¿Rechazar la cotización ${code} y avisar amablemente a la clienta?`
+      : `¿Aprobar ${code} por ${formatCOP(precio)} y enviarle el precio oficial a la clienta por WhatsApp?`;
+  if (!confirm(confirmMsg)) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/cotizaciones/${encodeURIComponent(code)}/resolver`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${state.adminToken}`,
+      },
+      body: JSON.stringify({
+        action,
+        precio_aprobado_cop: action === 'RECHAZAR' ? undefined : precio,
+        nota_mama: nota || undefined,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      throw new Error(data.error || 'No se pudo procesar la cotización.');
+    }
+    alert(
+      action === 'RECHAZAR'
+        ? `Cotización ${code} rechazada y clienta notificada.`
+        : `✅ Cotización ${code} aprobada por ${formatCOP(precio)}. Ya avisamos a la clienta por WhatsApp!`
+    );
+    await Promise.all([loadAdminQuotes(), loadAdminChats(true)]);
+  } catch (err) {
+    alert(`Error: ${err.message}`);
   }
 }
 
@@ -1007,6 +1140,7 @@ function switchAdminSection(section) {
   });
 
   const map = {
+    cotizaciones: document.getElementById('adminSecCotizaciones'),
     caja: document.getElementById('adminSecCaja'),
     turnos: document.getElementById('adminSecTurnos'),
     chats: document.getElementById('adminSecChats'),

@@ -12,6 +12,14 @@ import { createWompiPaymentLink } from './wompi';
 import { createBoldPaymentLink } from './bold';
 import { sendWhatsAppText } from './whatsapp';
 import { buildClientCitaUrl } from './security';
+import { createQuoteAndNotifyAdmin } from './quotes';
+
+export interface AttachedImageInput {
+  base64?: string;
+  mimeType?: string;
+  mediaId?: string;
+  contactName?: string;
+}
 
 export interface ChatTurn {
   role: 'user' | 'model';
@@ -31,6 +39,9 @@ export interface ChatMemory {
   ultimo_ticket_link?: string;
   notas?: string;
   mantenimientos_enviados?: string[];
+  cotizacion_aprobada_code?: string;
+  cotizacion_aprobada_cop?: number;
+  cotizacion_aprobada_detalle?: string;
 }
 
 export interface StoredChatSession {
@@ -208,6 +219,8 @@ interface ToolExecutionContext {
   fromPhone: string;
   origin: 'WhatsApp Bot' | 'Página Web';
   memory: ChatMemory;
+  attachedImage?: AttachedImageInput;
+  quoteCreatedThisTurn?: boolean;
   lastCreatedBooking?: {
     citaId: string;
     servicio: string;
@@ -295,11 +308,20 @@ async function executeBotTool(
 
   if (call.name === 'solicitar_cotizacion_personalizada') {
     const clienteNombre = String(
-      call.args.cliente_nombre || memory.cliente_nombre || 'Cliente interesado'
+      call.args.cliente_nombre ||
+        memory.cliente_nombre ||
+        ctx.attachedImage?.contactName ||
+        'Cliente interesado'
     ).trim();
     const telefonoArgs = String(call.args.cliente_telefono || fromPhone || '').replace(/\D/g, '');
     const categoria = String(call.args.categoria || 'Diseño Personalizado').trim();
     const descripcionDiseno = String(call.args.descripcion_diseno || '').trim();
+    const analisisIa = call.args.analisis_ia ? String(call.args.analisis_ia).trim() : '';
+    const estimadoCopRaw = Number(call.args.estimado_cop || 0);
+    const estimadoCop =
+      Number.isFinite(estimadoCopRaw) && estimadoCopRaw >= 5000
+        ? Math.round(estimadoCopRaw)
+        : undefined;
     const fechaTentativa = call.args.fecha_tentativa
       ? String(call.args.fecha_tentativa).trim()
       : memory.fecha_ymd
@@ -307,37 +329,63 @@ async function executeBotTool(
         : '';
     const estimadoOrientativo = call.args.estimado_orientativo
       ? String(call.args.estimado_orientativo).trim()
-      : '';
+      : estimadoCop
+        ? `Aprox. ${formatCOP(estimadoCop)}`
+        : '';
+    const servicioIdArg = Number(call.args.servicio_id || memory.servicio_id || 0);
+
+    let servicioBase: ServicioRow | null = null;
+    if (servicioIdArg > 0) {
+      servicioBase = await env.DB.prepare(
+        'SELECT id, categoria, nombre, duracion_minutos, precio_cop FROM servicios WHERE id = ?1 AND activo = 1'
+      )
+        .bind(servicioIdArg)
+        .first<ServicioRow>();
+    }
 
     if (clienteNombre && clienteNombre !== 'Cliente interesado') {
       memory.cliente_nombre = clienteNombre;
+    }
+    if (servicioBase) {
+      memory.servicio_id = servicioBase.id;
+      memory.servicio_nombre = servicioBase.nombre;
     }
     if (descripcionDiseno) {
       memory.notas = `${categoria}: ${descripcionDiseno}`.slice(0, 220);
     }
 
-    if (!descripcionDiseno) {
+    if (!descripcionDiseno && !analisisIa) {
       return {
         ok: false,
-        error: 'Pide los detalles del diseño de uñas o trabajo de cabello antes de enviar la cotización.',
+        error: 'Describe el diseño de uñas o trabajo de cabello antes de enviar la cotización.',
       };
     }
 
-    await sendQuoteAlertToAdmin(env, {
+    const quote = await createQuoteAndNotifyAdmin(env, {
       origen: origin,
       clienteNombre,
       clienteTelefono: telefonoArgs,
       categoria,
-      descripcionDiseno,
-      estimadoOrientativo,
-      fechaTentativa,
+      servicioId: servicioBase?.id,
+      servicioNombre: servicioBase?.nombre,
+      descripcionDiseno: descripcionDiseno || analisisIa,
+      analisisIa: analisisIa || undefined,
+      estimadoCop: estimadoCop || servicioBase?.precio_cop,
+      estimadoRango: estimadoOrientativo || undefined,
+      fechaTentativa: fechaTentativa || undefined,
+      mediaId: ctx.attachedImage?.mediaId,
     });
+
+    ctx.quoteCreatedThisTurn = true;
 
     return {
       ok: true,
+      codigo_cotizacion: quote.code,
       especialista_notificada: true,
+      foto_reenviada_a_especialista: Boolean(ctx.attachedImage?.mediaId),
+      estimado_sugerido: quote.estimado_cop ? formatCOP(quote.estimado_cop) : estimadoOrientativo,
       mensaje_confirmacion:
-        'Solicitud de cotización enviada al WhatsApp de nuestra especialista de Spa Superlook. Te confirmará el precio exacto muy pronto.',
+        `Cotización ${quote.code} enviada al WhatsApp personal de nuestra especialista de Spa Superlook para su aprobación final. Apenas confirme el valor exacto te llegará un mensaje aquí mismo.`,
       web_citas: env.DASHBOARD_URL || 'https://spa-superlook.vercel.app',
     };
   }
@@ -347,7 +395,7 @@ async function executeBotTool(
       call.args.cliente_nombre || memory.cliente_nombre || ''
     ).trim();
     const clienteTelefono = String(call.args.cliente_telefono || fromPhone || '').replace(/\D/g, '');
-    const servicioId = Number(call.args.servicio_id || memory.servicio_id || 0);
+    let servicioId = Number(call.args.servicio_id || memory.servicio_id || 0);
     let fechaHoraInicioRaw = String(call.args.fecha_hora_inicio || '').trim();
 
     if (!fechaHoraInicioRaw && memory.fecha_ymd && memory.hora_hhmm) {
@@ -363,6 +411,14 @@ async function executeBotTool(
         ok: false,
         error: 'Falta el número de WhatsApp (10 dígitos en Colombia) para emitir el ticket y enviar el link de pago.',
       };
+    }
+
+    // Si hay cotización aprobada por Mamá pero no se pasó servicio_id, tomar el primer servicio activo relacionado
+    if (!servicioId && memory.cotizacion_aprobada_cop) {
+      const fallbackSrv = await env.DB.prepare(
+        'SELECT id FROM servicios WHERE activo = 1 ORDER BY id ASC LIMIT 1'
+      ).first<{ id: number }>();
+      if (fallbackSrv?.id) servicioId = fallbackSrv.id;
     }
 
     if (!servicioId) {
@@ -441,7 +497,19 @@ async function executeBotTool(
 
     const citaId = crypto.randomUUID();
     const wompiReference = `SLK-${citaId.slice(0, 8).toUpperCase()}-${Date.now().toString(36).toUpperCase()}`;
-    const montoTotal = servicio.precio_cop;
+
+    // Si Mamá aprobó una cotización personalizada para esta clienta, usar ese monto oficial exacto
+    const usarPrecioAprobado =
+      Boolean(memory.cotizacion_aprobada_cop && memory.cotizacion_aprobada_cop >= 5000) &&
+      (call.args.usar_precio_cotizacion_aprobada !== false);
+    const montoTotal = usarPrecioAprobado
+      ? Math.round(memory.cotizacion_aprobada_cop!)
+      : servicio.precio_cop;
+    const serviceDisplayName =
+      usarPrecioAprobado && memory.cotizacion_aprobada_code
+        ? `${servicio.nombre} (${memory.cotizacion_aprobada_code})`
+        : servicio.nombre;
+
     const montoReembolso80 = Math.round(montoTotal * 0.8);
     const montoRetencion20 = montoTotal - montoReembolso80;
     const createdAt = new Date().toISOString();
@@ -475,7 +543,7 @@ async function executeBotTool(
       ? await createBoldPaymentLink(env, {
           reference: wompiReference,
           amountCop: montoTotal,
-          serviceName: servicio.nombre,
+          serviceName: serviceDisplayName,
           customerName: clienteNombre,
           customerPhone: clienteTelefono,
           redirectUrl: linkGestionCita,
@@ -483,7 +551,7 @@ async function executeBotTool(
       : await createWompiPaymentLink(env, {
           reference: wompiReference,
           amountCop: montoTotal,
-          serviceName: servicio.nombre,
+          serviceName: serviceDisplayName,
           customerName: clienteNombre,
           customerPhone: clienteTelefono,
           redirectUrl: linkGestionCita,
@@ -501,10 +569,15 @@ async function executeBotTool(
     memory.ultima_cita_id = citaId;
     memory.ultimo_payment_link = paymentLink.paymentUrl;
     memory.ultimo_ticket_link = linkGestionCita;
+    if (usarPrecioAprobado) {
+      delete memory.cotizacion_aprobada_code;
+      delete memory.cotizacion_aprobada_cop;
+      delete memory.cotizacion_aprobada_detalle;
+    }
 
     ctx.lastCreatedBooking = {
       citaId,
-      servicio: servicio.nombre,
+      servicio: serviceDisplayName,
       fechaHora: `${memory.fecha_ymd} a las ${memory.hora_hhmm}`,
       montoTotal: formatCOP(montoTotal),
       reembolso80: formatCOP(montoReembolso80),
@@ -518,7 +591,7 @@ async function executeBotTool(
       negocio: NOMBRE_OFICIAL_NEGOCIO,
       pasarela: useBold ? 'Bold' : 'Wompi',
       cita_id: citaId,
-      servicio: servicio.nombre,
+      servicio: serviceDisplayName,
       fecha_hora_local: `${memory.fecha_ymd} ${memory.hora_hhmm} (Colombia)`,
       monto_total: formatCOP(montoTotal),
       monto_retencion_20: formatCOP(montoRetencion20),
@@ -561,6 +634,9 @@ async function buildSystemInstruction(
       : null,
     memory.fecha_ymd ? `- Fecha solicitada: ${memory.fecha_ymd}` : null,
     memory.hora_hhmm ? `- Hora solicitada: ${memory.hora_hhmm}` : null,
+    memory.cotizacion_aprobada_cop
+      ? `- ⭐ COTIZACIÓN APROBADA POR LA ESPECIALISTA (${memory.cotizacion_aprobada_code || 'OFICIAL'}): ${formatCOP(memory.cotizacion_aprobada_cop)} — ${memory.cotizacion_aprobada_detalle || ''}. ¡USA ESTE PRECIO EXACTO (usar_precio_cotizacion_aprobada: true) al crear la reserva con Bold!`
+      : null,
     memory.notas ? `- Notas / Cotización: ${memory.notas}` : null,
     memory.ultimo_payment_link ? `- Último link de pago generado: ${memory.ultimo_payment_link}` : null,
   ].filter(Boolean);
@@ -579,37 +655,60 @@ ${calendarBlock}
 CATÁLOGO ACTIVO REAL EN BASE DE DATOS (usa SIEMPRE estos IDs exactos para agendar):
 ${catalogLines || '  (Aún no hay servicios activos)'}
 
+TABLA DE PRECIOS VARIABLES Y REGLAS DE COTIZACIÓN DE LA ESPECIALISTA (MAMÁ):
+- **Uñas & Manicure**:
+  • Manicure Tradicional: $22.000 (precio fijo).
+  • Manicure Semipermanente: $25.000 unicolor hasta $60.000 según diseño, nail art, efectos o retiro (tarifa promedio diseño: $45.000).
+  • Uñas en Acrílico (Esculpidas): rango $60.000 a $90.000 según largo y decoración (base establecida: $65.000).
+  • Uñas Soft Gel / Press-On: rango $75.000 a $100.000 según largo y diseño (base establecida: $75.000).
+  • Extensiones en Gel / Poligel: rango $75.000 a $110.000 según largo y diseño (base establecida: $80.000).
+- **Pedicure & Spa Pies**: Tradicional $28.000 (fijo) | Semipermanente $40.000 a $55.000 según diseño.
+- **Tratamientos Capilares** (varían según largo y abundancia del cabello):
+  • Keratina: base $160.000 (rango $160.000–$320.000).
+  • Cirugía Capilar: base $140.000 (rango $140.000–$280.000).
+  • Laminado Capilar: base $95.000 (rango $95.000–$180.000).
+  • Ampolleta de Reestructuración Capilar: $45.000 (fijo).
+- **Cabello, Corte & Color** (colorimetría varía según largo, base actual y tono deseado):
+  • Corte de Cabello & Asesoría de Imagen: $35.000 (fijo).
+  • Analogía de Color / Colorimetría: base $110.000 (rango $110.000–$220.000).
+  • Mechas / Iluminaciones / Rayitos: base $160.000 (rango $160.000–$320.000).
+  • Babylights (Baby Highlights): base $190.000 (rango $190.000–$360.000).
+  • Balayage Profesional: base $220.000 (rango $220.000–$420.000).
+- **Pestañas & Mirada** (precios fijos):
+  • Pestañas en Tira: $25.000 | Punto a Punto: $40.000 | Pelo a Pelo (Efecto Natural): $85.000 | Volumen 3D: $115.000.
+
 MEMORIA ACTUAL DE ESTA CONVERSACIÓN (NO vuelvas a pedir datos que YA están aquí o en el historial):
 ${memoryLines.length > 0 ? memoryLines.join('\n') : '- Aún no se han guardado datos de reserva.'}
 
 PERSONALIDAD Y TONO:
 - Cálida, elegante, servicial, directa y resolutiva.
-- Usa un trato respetuoso y amable SIN asumir género ("¡Hola! ✨ Qué alegría saludarte...", "¡Perfecto, Wilman! ✨") a menos que el nombre o la conversación indique claramente género.
-- En el PRIMER saludo únicamente, da una bienvenida encantadora presentando brevemente que puedes ayudarle a ver servicios, agendar aquí mismo (o en ${webUrl}) y cotizar diseños de uñas/cabello.
+- Usa un trato respetuoso y amable SIN asumir género ("¡Hola! ✨ Qué alegría saludarte...", "¡Perfecto, Camila! ✨") a menos que el nombre o la conversación indique claramente género.
+- En el PRIMER saludo únicamente, da una bienvenida encantadora presentando brevemente que puedes ayudarle a ver servicios, agendar aquí mismo (o en ${webUrl}) y cotizar diseños de uñas o trabajos de cabello enviando una foto.
 - En mensajes posteriores, **NUNCA repitas el saludo largo ni el menú inicial**: continúa la conversación con naturalidad, usando todo lo que ya te dijeron!
 
-FLUJO INTELIGENTE DE RESERVA (SIGUE ESTO AL PIE DE LA LETRA):
-1. Para crear una reserva con link automático de pago de **Bold** (crear_reserva_con_pago) solo necesitas 3 cosas en WhatsApp (o 4 en Web):
-   - **Servicio del catálogo** (un servicio_id real del CATÁLOGO ACTIVO de arriba)
-   - **Nombre del cliente**
-   - **Fecha y hora exacta** (convertida con el CALENDARIO OFICIAL EXACTO a YYYY-MM-DDTHH:mm:00-05:00)
-   - *(Solo si es Página Web: número de WhatsApp de 10 dígitos; en WhatsApp YA lo tienes en ${fromPhone}!)*
-2. **NO HAGAS PREGUNTAS REPETIDAS NI INNECESARIAS**:
-   - Apenas el cliente diga un dato (ej. su nombre, la fecha o la hora), recuérdalo usando la memoria y el historial. Si falta solo 1 dato (ej. solo falta la fecha o elegir el servicio), pregunta **únicamente por ese dato faltante** en 1 o 2 líneas!
-   - Apenas tengas **Servicio del catálogo + Nombre + Fecha + Hora** (y teléfono), llama **DE INMEDIATO** a crear_reserva_con_pago en ese mismo turno (ella ya verifica solapamiento en la base de datos y te devuelve horarios alternativos si está ocupado, o el payment_link de **Bold** + link_gestion_cita si está libre!).
-   - Cuando crear_reserva_con_pago devuelva ok: true, entrega SIEMPRE de forma súper clara:
+FLUJO INTELIGENTE DE RESERVA Y COTIZACIÓN CON FOTOS (SIGUE ESTO AL PIE DE LA LETRA):
+1. **CUANDO LA CLIENTA ENVÍA UNA FOTO DE REFERENCIA (uñas, diseño, su cabello o inspiración de color)**:
+   - Observa la imagen con muchísimo detalle (técnica de uñas, largo, decoración/pedrería/francés/3D, o largo/abundancia/tono actual y deseado del cabello).
+   - Ubica el servicio base del CATÁLOGO ACTIVO (su \`servicio_id\`) y calcula un **precio estimado orientativo realista** (\`estimado_cop\` y \`estimado_orientativo\`) estrictamente dentro de la TABLA DE PRECIOS VARIABLES de arriba.
+   - Llama **DE INMEDIATO EN ESTE MISMO TURNO** a \`solicitar_cotizacion_personalizada\` pasando \`servicio_id\`, \`categoria\`, \`descripcion_diseno\`, \`analisis_ia\`, \`estimado_cop\` y \`estimado_orientativo\`. Esta herramienta reenvía automáticamente la foto real y tu sugerencia de precio al WhatsApp personal de nuestra especialista para que ella apruebe o ajuste el valor exacto!
+   - En tu respuesta a la clienta: elogia brevemente su idea, comparte el **rango/estimado orientativo** (dejando claro que es un estimado sujeto a confirmación), indícale su código de cotización (\`COT-XXX\`), y dile que **ya le enviamos su foto a nuestra especialista** para aprobar el precio exacto y que apenas lo confirme le llegará el mensaje aquí mismo para agendar su turno con link de Bold. Si todavía no dijo su nombre o fecha tentativa, pregúntaselos en 1 línea amable.
+2. **CUANDO LA CLIENTA PIDE COTIZAR POR TEXTO UN SERVICIO DE PRECIO VARIABLE** (ej. balayage en cabello largo, keratina abundante, uñas acrílicas largas con diseño):
+   - Dale el rango real de la tabla, invítala a enviarte **una foto por aquí mismo** (de su cabello o del diseño deseado) para que la especialista le confirme el valor exacto, O si ya dio suficiente detalle, llama a \`solicitar_cotizacion_personalizada\` para pedir aprobación a nuestra especialista al WhatsApp personal.
+   - Si la clienta prefiere agendar de una vez con la tarifa base establecida o pidió un servicio de precio fijo, procede directo al paso 3!
+3. **RESERVA DIRECTA CON LINK DE PAGO BOLD (\`crear_reserva_con_pago\`)**:
+   - Solo necesitas 3 cosas en WhatsApp (o 4 en Web): **Servicio del catálogo (\`servicio_id\`) + Nombre + Fecha y Hora exacta** (\`YYYY-MM-DDTHH:mm:00-05:00\`).
+   - Si en la MEMORIA ACTUAL ya existe una **⭐ COTIZACIÓN APROBADA POR LA ESPECIALISTA**, apenas la clienta confirme día y hora llama **DE INMEDIATO** a \`crear_reserva_con_pago\` con \`usar_precio_cotizacion_aprobada: true\` para emitir el Link de Pago de **Bold** por el **precio exacto aprobado por la especialista**!
+   - **NO HAGAS PREGUNTAS REPETIDAS**: si falta solo 1 dato, pregunta únicamente por ese dato en 1 o 2 líneas.
+   - Cuando \`crear_reserva_con_pago\` devuelva \`ok: true\`, entrega SIEMPRE de forma súper clara:
      * Resumen del turno (Nombre, Servicio, Fecha/Hora, Valor 100%)
-     * **Link de pago automático en Bold** (payment_link)
-     * **Enlace privado de su ticket** (link_gestion_cita)
+     * **Link de pago automático en Bold** (\`payment_link\`)
+     * **Enlace privado de su ticket** (\`link_gestion_cita\`)
      * Recordatorio breve de bloqueo de 20 minutos y política obligatoria (80% reembolso / 20% retención).
-3. **SERVICIOS PERSONALIZADOS QUE NO ESTÁN EN EL CATÁLOGO ACTUAL** (ej. uñas acrílicas con diseño, balayage, keratina, pedicura si aún no aparece en el catálogo de arriba):
-   - Sé 100% honesta: dile claramente que ese diseño/servicio específico no tiene tarifa fija en el catálogo automático todavía y que se cotiza personalizado con nuestra especialista.
-   - Si ya tienes su nombre y qué desea (y fecha/hora tentativa si la dio), llama **de una vez** a solicitar_cotizacion_personalizada para notificar a nuestra especialista al WhatsApp de Mamá, Y dile también qué servicios sí tenemos disponibles para agendar de inmediato con link de Bold por si quiere reservar alguno ya mismo.
 4. **CONFIRMACIÓN DE MANTENIMIENTOS (25 DÍAS UÑAS / 30 DÍAS CABELLO)**:
-   - Si el cliente responde "Sí", "Quiero agendar mi mantenimiento" o confirma después de un recordatorio de mantenimiento (25 días para manicura/pedicura o 30 días para cabello), revisa la MEMORIA ACTUAL (donde ya está su nombre y servicio) y pregúntale únicamente qué día y hora prefiere (si no lo dijo aún), o agenda de una vez con crear_reserva_con_pago para enviarle su link de pago de Bold. Si dice que no desea mantenimiento por ahora, agradécele amablemente y recuérdale que siempre estamos para atenderle cuando guste.
+   - Si el cliente confirma tras un recordatorio de mantenimiento, usa la MEMORIA ACTUAL (nombre y servicio) y pregúntale solo día/hora si falta, o agenda de una vez con \`crear_reserva_con_pago\`.
 5. **Datos oficiales de Spa Superlook**:
    - Ubicación: Transversal 86A #83A-30 (atención ÚNICAMENTE bajo reserva previa).
-   - Instagram oficial (donde pueden ver fotos de trabajos reales de uñas y cabello): https://www.instagram.com/yc_peluqueriasuperlook/ (@yc_peluqueriasuperlook)
+   - Instagram oficial: https://www.instagram.com/yc_peluqueriasuperlook/ (@yc_peluqueriasuperlook)
    - Correo: juanpalook@gmail.com | Web: ${webUrl}
    - Política obligatoria de cancelación: Reembolso del 80% y retención del 20% por gastos administrativos y bloqueo de agenda.`;
 }
@@ -665,6 +764,11 @@ function getToolsDeclaration() {
                 description:
                   'Fecha y hora exacta en formato ISO8601 con zona Colombia -05:00 (ej. 2026-11-23T09:00:00-05:00)',
               },
+              usar_precio_cotizacion_aprobada: {
+                type: 'BOOLEAN',
+                description:
+                  'Poner true si la clienta ya tiene una cotización aprobada por la especialista en MEMORIA ACTUAL para cobrar ese valor exacto en Bold.',
+              },
             },
             required: ['cliente_nombre', 'servicio_id', 'fecha_hora_inicio'],
           },
@@ -672,15 +776,30 @@ function getToolsDeclaration() {
         {
           name: 'solicitar_cotizacion_personalizada',
           description:
-            'Envía alerta inmediata al WhatsApp de la especialista/dueña de Spa Superlook cuando el cliente quiere cotizar un diseño de uñas, balayage, tintura, keratina o servicio que aún no tiene tarifa fija en el catálogo.',
+            'Registra una cotización con código COT-XXX y envía alerta inmediata (incluyendo la foto real si la clienta mandó imagen) al WhatsApp personal de la especialista/dueña de Spa Superlook para que ella apruebe o ajuste el precio exacto.',
           parameters: {
             type: 'OBJECT',
             properties: {
               cliente_nombre: { type: 'STRING', description: 'Nombre del cliente' },
               cliente_telefono: { type: 'STRING', description: 'WhatsApp del cliente (automático en WhatsApp)' },
-              categoria: { type: 'STRING', description: 'Categoría (ej. Uñas, Cabello, Pedicura, Colorimetría)' },
-              descripcion_diseno: { type: 'STRING', description: 'Detalle del servicio o diseño solicitado' },
-              estimado_orientativo: { type: 'STRING', description: 'Referencia de precio si aplica' },
+              servicio_id: {
+                type: 'INTEGER',
+                description: 'ID numérico del servicio base del catálogo más cercano (opcional pero recomendado)',
+              },
+              categoria: {
+                type: 'STRING',
+                description: 'Categoría (ej. Uñas & Manicure, Pedicure & Spa Pies, Tratamientos Capilares, Cabello, Corte & Color, Pestañas & Mirada)',
+              },
+              descripcion_diseno: { type: 'STRING', description: 'Detalle del servicio, largo, técnica o diseño solicitado' },
+              analisis_ia: {
+                type: 'STRING',
+                description: 'Resumen breve de lo observado en la foto enviada por la clienta (si aplica)',
+              },
+              estimado_cop: {
+                type: 'INTEGER',
+                description: 'Valor numérico sugerido en pesos colombianos (ej. 85000) según la tabla de rangos de la especialista',
+              },
+              estimado_orientativo: { type: 'STRING', description: 'Rango orientativo legible (ej. "$75.000 - $90.000")' },
               fecha_tentativa: { type: 'STRING', description: 'Fecha/hora deseada si la mencionó' },
             },
             required: ['cliente_nombre', 'categoria', 'descripcion_diseno'],
@@ -736,10 +855,27 @@ async function runGeminiConversation(
   try {
     const systemInstruction = await buildSystemInstruction(env, origin, fromPhone, memory);
     const toolsDeclaration = getToolsDeclaration();
-    const contents: Array<Record<string, unknown>> = history.map((turn) => ({
-      role: turn.role,
-      parts: [{ text: turn.text }],
-    }));
+    const contents: Array<Record<string, unknown>> = history.map((turn, idx) => {
+      const isLastUserTurn = idx === history.length - 1 && turn.role === 'user';
+      if (isLastUserTurn && ctx.attachedImage?.base64) {
+        return {
+          role: turn.role,
+          parts: [
+            { text: turn.text },
+            {
+              inlineData: {
+                mimeType: ctx.attachedImage.mimeType || 'image/jpeg',
+                data: ctx.attachedImage.base64,
+              },
+            },
+          ],
+        };
+      }
+      return {
+        role: turn.role,
+        parts: [{ text: turn.text }],
+      };
+    });
 
     // Soportar hasta 5 rondas de Function Calling y múltiples llamadas paralelas por turno
     for (let step = 0; step < 5; step++) {
@@ -853,7 +989,8 @@ async function buildFallbackReply(env: Env, isFirstTurn: boolean, memory: ChatMe
 export async function handleIncomingWhatsAppMessage(
   env: Env,
   fromPhone: string,
-  incomingText: string
+  incomingText: string,
+  attachedImage?: AttachedImageInput
 ): Promise<string> {
   const existingSession = await env.DB.prepare(
     'SELECT telefono, historial_json, updated_at FROM chat_sesiones WHERE telefono = ?1'
@@ -867,6 +1004,10 @@ export async function handleIncomingWhatsAppMessage(
   const isFirstTurn = history.length === 0;
   const nowIso = new Date().toISOString();
 
+  if (attachedImage?.contactName && !memory.cliente_nombre) {
+    memory.cliente_nombre = attachedImage.contactName;
+  }
+
   history.push({ role: 'user', text: incomingText, sender: 'client', timestamp: nowIso });
   if (history.length > 24) {
     history = history.slice(history.length - 24);
@@ -874,6 +1015,16 @@ export async function handleIncomingWhatsAppMessage(
 
   // Si Mamá activó control humano en este chat, guardar el mensaje para su bandeja y no responder con IA
   if (session.human_takeover) {
+    if (attachedImage?.mediaId) {
+      await createQuoteAndNotifyAdmin(env, {
+        origen: 'WhatsApp Bot',
+        clienteNombre: memory.cliente_nombre || attachedImage.contactName || 'Clienta WhatsApp',
+        clienteTelefono: fromPhone,
+        categoria: 'Foto de Referencia',
+        descripcionDiseno: incomingText,
+        mediaId: attachedImage.mediaId,
+      }).catch(() => {});
+    }
     await env.DB.prepare(
       `INSERT INTO chat_sesiones (telefono, historial_json, updated_at)
        VALUES (?1, ?2, ?3)
@@ -892,9 +1043,32 @@ export async function handleIncomingWhatsAppMessage(
     fromPhone,
     origin: 'WhatsApp Bot',
     memory,
+    attachedImage,
   };
 
   let replyText = await runGeminiConversation(ctx, history);
+
+  // Garantía 100%: si la clienta envió una FOTO y Gemini no invocó solicitar_cotizacion_personalizada,
+  // igual creamos el registro COT-XXX y reenviamos la foto real al WhatsApp personal de Mamá.
+  if (attachedImage?.mediaId && !ctx.quoteCreatedThisTurn) {
+    const fallbackQuote = await createQuoteAndNotifyAdmin(env, {
+      origen: 'WhatsApp Bot',
+      clienteNombre: memory.cliente_nombre || attachedImage.contactName || 'Clienta WhatsApp',
+      clienteTelefono: fromPhone,
+      categoria: 'Cotización con Foto',
+      servicioId: memory.servicio_id,
+      servicioNombre: memory.servicio_nombre,
+      descripcionDiseno: incomingText,
+      mediaId: attachedImage.mediaId,
+    }).catch(() => null);
+
+    if (!replyText && fallbackQuote) {
+      replyText =
+        `📸✨ ¡Qué lindo! Recibimos tu foto de referencia en *${NOMBRE_OFICIAL_NEGOCIO}* (código *${fallbackQuote.code}*).\n\n` +
+        `Ya se la reenviamos directamente a nuestra especialista para que te confirme el valor exacto. Apenas lo apruebe te llegará el mensaje aquí mismo para agendar tu turno con link de pago en *Bold* 💖.`;
+    }
+  }
+
   if (!replyText) {
     replyText = await buildFallbackReply(env, isFirstTurn, memory);
   }

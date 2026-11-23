@@ -11,3 +11,9 @@ out/
 *.tsbuildinfo
 next-env.d.ts
 _prototipo_anterior/
+audios servicios/
+*.ogg
+*.opus
+*.m4a
+*.mp3
+*.wav

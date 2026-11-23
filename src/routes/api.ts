@@ -17,8 +17,13 @@ import {
   ChatTurn,
   handleWebChatMessage,
   parseChatSession,
-  sendQuoteAlertToAdmin,
 } from '../services/gemini-bot';
+import {
+  createQuoteAndNotifyAdmin,
+  listQuotes,
+  QUOTES_STORAGE_KEY,
+  resolveQuoteAndNotifyClient,
+} from '../services/quotes';
 import {
   buildClientCitaUrl,
   checkRateLimit,
@@ -217,8 +222,8 @@ apiRoutes.post('/cotizaciones', async (c) => {
 
   // Buscar rango orientativo en el catálogo activo según la categoría
   const { results: srvList } = await c.env.DB.prepare(
-    'SELECT categoria, nombre, precio_cop FROM servicios WHERE activo = 1 ORDER BY precio_cop ASC'
-  ).all<Pick<ServicioRow, 'categoria' | 'nombre' | 'precio_cop'>>();
+    'SELECT id, categoria, nombre, precio_cop FROM servicios WHERE activo = 1 ORDER BY precio_cop ASC'
+  ).all<Pick<ServicioRow, 'id' | 'categoria' | 'nombre' | 'precio_cop'>>();
 
   const catLower = categoria.toLowerCase();
   const matched = (srvList || []).filter(
@@ -228,6 +233,7 @@ apiRoutes.post('/cotizaciones', async (c) => {
   );
   const refList = matched.length > 0 ? matched : srvList || [];
   let estimadoOrientativo = 'Cotización personalizada según valoración de nuestra especialista';
+  let baseServicio = refList[0];
   if (refList.length > 0) {
     const minP = refList[0].precio_cop;
     const maxP = refList[refList.length - 1].precio_cop;
@@ -237,13 +243,16 @@ apiRoutes.post('/cotizaciones', async (c) => {
         : `Referencia en catálogo entre ${formatCOP(minP)} y ${formatCOP(maxP)}`;
   }
 
-  await sendQuoteAlertToAdmin(c.env, {
+  const quote = await createQuoteAndNotifyAdmin(c.env, {
     origen: 'Página Web',
     clienteNombre,
     clienteTelefono,
     categoria,
+    servicioId: baseServicio?.id,
+    servicioNombre: baseServicio?.nombre,
     descripcionDiseno,
-    estimadoOrientativo,
+    estimadoCop: baseServicio?.precio_cop,
+    estimadoRango: estimadoOrientativo,
     fechaTentativa,
   });
 
@@ -251,20 +260,21 @@ apiRoutes.post('/cotizaciones', async (c) => {
   sendWhatsAppText(
     c.env,
     clienteTelefono,
-    `✨ *¡Hola ${clienteNombre}! Recibimos tu solicitud de cotización en ${NOMBRE_OFICIAL_NEGOCIO}* 🌸\n\n` +
+    `✨ *¡Hola ${clienteNombre}! Recibimos tu solicitud de cotización (${quote.code}) en ${NOMBRE_OFICIAL_NEGOCIO}* 🌸\n\n` +
       `• *Categoría:* ${categoria}\n` +
       `• *Tu solicitud:* ${descripcionDiseno}\n` +
       `• *Referencia:* ${estimadoOrientativo}\n\n` +
-      `Ya le enviamos el aviso a nuestra especialista para confirmarte el valor exacto y ayudarte a agendar tu turno. Si tienes una foto de inspiración, ¡puedes enviárnosla aquí mismo por este chat! 📸💅💇‍♀️`
+      `Ya le enviamos el aviso a nuestra especialista para confirmarte el valor exacto y ayudarte a agendar tu turno. Si tienes una foto de inspiración, ¡envíala aquí mismo por este chat y la analizamos al instante! 📸💅💇‍♀️`
   ).catch(() => {});
 
   return c.json(
     {
       ok: true,
+      codigo_cotizacion: quote.code,
       estimado_orientativo: estimadoOrientativo,
       especialista_notificada: Boolean(c.env.ADMIN_PHONE),
       mensaje:
-        '¡Listo! Ya enviamos los detalles de tu diseño directamente al WhatsApp de nuestra especialista y te confirmamos por WhatsApp.',
+        `¡Listo! Registramos tu cotización ${quote.code}, avisamos directamente al WhatsApp de nuestra especialista y te escribimos por WhatsApp.`,
     },
     201
   );
@@ -1211,8 +1221,10 @@ apiRoutes.get('/admin/chats', async (c) => {
   }
 
   const { results } = await c.env.DB.prepare(
-    'SELECT telefono, historial_json, updated_at FROM chat_sesiones ORDER BY updated_at DESC LIMIT 50'
-  ).all<ChatSesionRow>();
+    'SELECT telefono, historial_json, updated_at FROM chat_sesiones WHERE telefono != ?1 ORDER BY updated_at DESC LIMIT 50'
+  )
+    .bind(QUOTES_STORAGE_KEY)
+    .all<ChatSesionRow>();
 
   const chats = (results || []).map((row) => {
     const parsed = parseChatSession(row.historial_json);
@@ -1338,5 +1350,66 @@ apiRoutes.post('/admin/chats/:telefono/bot-mode', async (c) => {
     ok: true,
     telefono,
     human_takeover: session.human_takeover,
+  });
+});
+
+// ============================================================================
+// 6. GESTIÓN Y APROBACIÓN DE COTIZACIONES (PANEL PRIVADO DE MAMÁ)
+// ============================================================================
+
+/**
+ * GET /api/admin/cotizaciones
+ * PROTEGIDO (Solo Admin): Lista cotizaciones (fotos/diseños) recibidas por WhatsApp o Web.
+ */
+apiRoutes.get('/admin/cotizaciones', async (c) => {
+  const isAdmin = await isValidAdminRequest(c);
+  if (!isAdmin) {
+    return c.json({ ok: false, error: 'No autorizado.' }, 401);
+  }
+
+  const cotizaciones = await listQuotes(c.env);
+  return c.json({
+    ok: true,
+    cotizaciones,
+  });
+});
+
+/**
+ * POST /api/admin/cotizaciones/:code/resolver
+ * PROTEGIDO (Solo Admin): Aprueba, ajusta precio exacto o rechaza una cotización
+ * y notifica automáticamente a la clienta por WhatsApp oficial (+57 312 459 7896).
+ */
+apiRoutes.post('/admin/cotizaciones/:code/resolver', async (c) => {
+  const isAdmin = await isValidAdminRequest(c);
+  if (!isAdmin) {
+    return c.json({ ok: false, error: 'No autorizado.' }, 401);
+  }
+
+  const code = c.req.param('code').toUpperCase();
+  let body: { action?: string; precio_aprobado_cop?: number; nota_mama?: string };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ ok: false, error: 'Cuerpo JSON inválido' }, 400);
+  }
+
+  const actionRaw = (body.action || 'PRECIO').toUpperCase();
+  const action: 'APROBAR' | 'PRECIO' | 'RECHAZAR' =
+    actionRaw === 'RECHAZAR' ? 'RECHAZAR' : actionRaw === 'APROBAR' ? 'APROBAR' : 'PRECIO';
+
+  const result = await resolveQuoteAndNotifyClient(c.env, {
+    code,
+    action,
+    customPriceCop: body.precio_aprobado_cop ? Number(body.precio_aprobado_cop) : undefined,
+    notaMama: body.nota_mama,
+  });
+
+  if (!result.ok) {
+    return c.json({ ok: false, error: result.error || 'No se pudo actualizar la cotización.' }, 400);
+  }
+
+  return c.json({
+    ok: true,
+    cotizacion: result.quote,
   });
 });

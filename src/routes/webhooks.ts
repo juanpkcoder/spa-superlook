@@ -14,8 +14,13 @@ import {
   BoldWebhookEvent,
   verifyBoldWebhookSignature,
 } from '../services/bold';
-import { sendWhatsAppTemplate, sendWhatsAppText } from '../services/whatsapp';
+import {
+  downloadWhatsAppMediaAsBase64,
+  sendWhatsAppTemplate,
+  sendWhatsAppText,
+} from '../services/whatsapp';
 import { handleIncomingWhatsAppMessage } from '../services/gemini-bot';
+import { handleAdminWhatsAppQuoteCommand } from '../services/quotes';
 import {
   buildClientCitaUrl,
   verifyMetaWebhookSignature,
@@ -432,7 +437,14 @@ webhookRoutes.post('/whatsapp', async (c) => {
   }
 
   const entries = body.entry || [];
-  const incomingTasks: Array<{ from: string; text: string; isImage?: boolean; contactName?: string }> = [];
+  const incomingTasks: Array<{
+    from: string;
+    text: string;
+    isImage?: boolean;
+    mediaId?: string;
+    mimeType?: string;
+    contactName?: string;
+  }> = [];
 
   for (const entry of entries) {
     for (const change of entry.changes || []) {
@@ -444,9 +456,16 @@ webhookRoutes.post('/whatsapp', async (c) => {
         } else if (msg.type === 'image' && msg.from) {
           const caption = (msg.image?.caption || '').trim();
           const syntheticText = caption
-            ? `[Envié una foto de referencia de diseño/cabello con comentario: "${caption}"]`
-            : '[Envié una foto de referencia de un diseño de uñas o cabello para cotizar]';
-          incomingTasks.push({ from: msg.from, text: syntheticText, isImage: true, contactName });
+            ? `[Foto enviada para cotizar] Comentario de la clienta: "${caption}"`
+            : '[Foto enviada de referencia de uñas o cabello para cotizar precio exacto]';
+          incomingTasks.push({
+            from: msg.from,
+            text: syntheticText,
+            isImage: true,
+            mediaId: msg.image?.id,
+            mimeType: msg.image?.mime_type,
+            contactName,
+          });
         }
       }
     }
@@ -455,16 +474,33 @@ webhookRoutes.post('/whatsapp', async (c) => {
   const processAllMessages = async () => {
     for (const task of incomingTasks) {
       try {
-        if (task.isImage && c.env.ADMIN_PHONE) {
-          await sendWhatsAppText(
+        // 1. Si el mensaje viene del WhatsApp personal de Mamá (ADMIN_PHONE) y es un comando
+        //    de aprobación/ajuste de cotización (ej: "APROBAR COT-101", "PRECIO COT-101 85000", "85000"),
+        //    procesarlo directamente sin activar el bot de clientas.
+        if (!task.isImage) {
+          const handledAsAdminQuote = await handleAdminWhatsAppQuoteCommand(
             c.env,
-            c.env.ADMIN_PHONE,
-            `📸 *[${NOMBRE_OFICIAL_NEGOCIO} - Foto de Referencia para Cotizar]*\n` +
-              `• *Clienta:* ${task.contactName} (+${task.from})\n` +
-              `• *Mensaje:* ${task.text}\n` +
-              `• *Responder directo:* https://wa.me/${task.from}`
+            task.from,
+            task.text
           );
+          if (handledAsAdminQuote) {
+            continue;
+          }
         }
+
+        // 2. Si la clienta envió una FOTO, descargarla en base64 para que Gemini Vision la analice,
+        //    calcule el estimado según los rangos de Mamá y reenvíe la foto real + COT-XXX a Mamá.
+        if (task.isImage && task.mediaId) {
+          const downloaded = await downloadWhatsAppMediaAsBase64(c.env, task.mediaId);
+          await handleIncomingWhatsAppMessage(c.env, task.from, task.text, {
+            base64: downloaded.ok ? downloaded.base64 : undefined,
+            mimeType: downloaded.mimeType || task.mimeType || 'image/jpeg',
+            mediaId: task.mediaId,
+            contactName: task.contactName,
+          });
+          continue;
+        }
+
         await handleIncomingWhatsAppMessage(c.env, task.from, task.text);
       } catch (err) {
         console.error(`Error procesando mensaje WhatsApp de ${task.from}:`, err);
