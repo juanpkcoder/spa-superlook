@@ -14,6 +14,7 @@ const state = {
   adminCitas: [],
   adminServicios: [],
   adminChats: [],
+  lastAdminChatsHash: '',
   chatPollingTimer: null,
   webChatHistory: [],
 };
@@ -595,6 +596,7 @@ async function handleAdminLogin(event) {
 function handleAdminLogout() {
   stopAdminChatPolling();
   state.adminToken = '';
+  state.lastAdminChatsHash = '';
   sessionStorage.removeItem('superlook_admin_token');
   checkAndLoadAdminPanel();
 }
@@ -638,7 +640,7 @@ async function loadAdminData() {
 // ============================================================================
 // 4B. BANDEJA DE CHATS EN VIVO WHATSAPP BUSINESS (+57 312 4597896)
 // ============================================================================
-async function loadAdminChats() {
+async function loadAdminChats(forceRender = false) {
   if (!state.adminToken) return;
   try {
     const res = await fetch(`${API_BASE}/api/admin/chats`, {
@@ -646,7 +648,16 @@ async function loadAdminChats() {
     });
     if (!res.ok) return;
     const data = await res.json();
-    state.adminChats = data.chats || [];
+    const incomingChats = data.chats || [];
+    const nextHash = JSON.stringify(incomingChats);
+
+    // Evitar re-renderizar si no hay mensajes nuevos (así el scroll nunca brinca mientras lees)
+    if (!forceRender && nextHash === state.lastAdminChatsHash) {
+      return;
+    }
+
+    state.lastAdminChatsHash = nextHash;
+    state.adminChats = incomingChats;
     renderAdminChats();
   } catch (err) {
     console.error('Error cargando chats WhatsApp:', err);
@@ -656,6 +667,25 @@ async function loadAdminChats() {
 function renderAdminChats() {
   const container = document.getElementById('adminChatsContainer');
   if (!container) return;
+
+  // Guardar posición de scroll y borradores escritos antes de actualizar el DOM
+  const scrollStateByPhone = new Map();
+  const draftsByPhone = new Map();
+
+  container.querySelectorAll('.chat-messages-box[data-chat-phone]').forEach((box) => {
+    const phone = box.getAttribute('data-chat-phone');
+    if (!phone) return;
+    const distanceFromBottom = box.scrollHeight - box.scrollTop - box.clientHeight;
+    scrollStateByPhone.set(phone, {
+      scrollTop: box.scrollTop,
+      wasNearBottom: distanceFromBottom < 48,
+    });
+  });
+
+  container.querySelectorAll('input[id^="replyInput_"]').forEach((inp) => {
+    const phone = inp.id.replace('replyInput_', '');
+    if (inp.value) draftsByPhone.set(phone, inp.value);
+  });
 
   if (state.adminChats.length === 0) {
     container.innerHTML =
@@ -683,7 +713,7 @@ function renderAdminChats() {
           return `
             <div class="chat-bubble ${cls}">
               <div style="font-size:0.68rem; font-weight:800; opacity:0.75; margin-bottom:0.15rem;">${label}</div>
-              <div>${escapeHtml(t.text)}</div>
+              <div>${linkifySafeText(t.text)}</div>
             </div>
           `;
         })
@@ -701,7 +731,7 @@ function renderAdminChats() {
               ${chat.human_takeover ? '✋ Atendiendo Mamá (Reactivar Bot)' : '🤖 Bot Activo (Pausar Bot)'}
             </button>
           </div>
-          <div class="chat-messages-box">${messagesHtml || '<div class="empty-state">Sin mensajes</div>'}</div>
+          <div class="chat-messages-box" data-chat-phone="${safePhone}">${messagesHtml || '<div class="empty-state">Sin mensajes</div>'}</div>
           <form class="chat-reply-row" onsubmit="sendAdminChatReply(event, '${safePhone}')">
             <input type="text" id="replyInput_${safePhone}" class="form-control" placeholder="Escribe como Spa Superlook (+57 312 4597896)..." required />
             <button type="submit" class="btn btn-primary btn-sm">Enviar</button>
@@ -710,6 +740,23 @@ function renderAdminChats() {
       `;
     })
     .join('');
+
+  // Restaurar scroll exacto (o bajar al último mensaje solo si es carga inicial / estaba al final)
+  container.querySelectorAll('.chat-messages-box[data-chat-phone]').forEach((box) => {
+    const phone = box.getAttribute('data-chat-phone');
+    if (!phone) return;
+    const prev = scrollStateByPhone.get(phone);
+    if (!prev || prev.wasNearBottom) {
+      box.scrollTop = box.scrollHeight;
+    } else {
+      box.scrollTop = prev.scrollTop;
+    }
+  });
+
+  draftsByPhone.forEach((val, phone) => {
+    const inp = document.getElementById(`replyInput_${phone}`);
+    if (inp) inp.value = val;
+  });
 }
 
 async function sendAdminChatReply(event, telefono) {
