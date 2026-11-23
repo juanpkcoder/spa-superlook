@@ -607,6 +607,8 @@ async function loadAdminData() {
     state.adminServicios = srvData.servicios || [];
 
     renderAdminKpis();
+    renderAdminPaymentBreakdown();
+    populateManualServiceDropdown();
     renderAdminTurnosPorJornada();
     renderAdminCitas();
     renderAdminServices();
@@ -743,12 +745,205 @@ async function toggleChatBotMode(telefono, pauseBot) {
   }
 }
 
+function classifyPaymentMethod(rawMetodo) {
+  const m = String(rawMetodo || 'ONLINE').toUpperCase();
+  if (m === 'EFECTIVO') return { group: 'EFECTIVO', label: '💵 Efectivo', cls: 'method-EFECTIVO' };
+  if (m === 'QR' || m === 'QR_BOLD') return { group: 'QR', label: '📲 Código QR', cls: 'method-QR' };
+  if (m === 'TRANSFERENCIA') {
+    return { group: 'TRANSFERENCIA', label: '🏦 Transferencia', cls: 'method-TRANSFERENCIA' };
+  }
+  return {
+    group: 'ONLINE',
+    label: `💳 ${m === 'WOMPI' ? 'Wompi' : m === 'BOLD' ? 'Bold' : m}`,
+    cls: 'method-ONLINE',
+  };
+}
+
+function renderAdminPaymentBreakdown() {
+  const container = document.getElementById('adminPaymentBreakdown');
+  if (!container) return;
+
+  const confirmadas = state.adminCitas.filter((c) => c.estado === 'CONFIRMADA');
+  const buckets = {
+    EFECTIVO: { total: 0, count: 0 },
+    QR: { total: 0, count: 0 },
+    TRANSFERENCIA: { total: 0, count: 0 },
+    ONLINE: { total: 0, count: 0 },
+  };
+
+  confirmadas.forEach((c) => {
+    const info = classifyPaymentMethod(c.metodo_pago);
+    buckets[info.group].total += Number(c.monto_total || 0);
+    buckets[info.group].count += 1;
+  });
+
+  container.innerHTML = `
+    <div class="pay-summary-card pay-efectivo">
+      <div class="pay-summary-title">💵 Ingresos Efectivo</div>
+      <div class="pay-summary-amount">${formatCOP(buckets.EFECTIVO.total)}</div>
+      <div class="pay-summary-count">${buckets.EFECTIVO.count} pago(s)</div>
+    </div>
+    <div class="pay-summary-card pay-qr">
+      <div class="pay-summary-title">📲 Ingresos Código QR</div>
+      <div class="pay-summary-amount">${formatCOP(buckets.QR.total)}</div>
+      <div class="pay-summary-count">${buckets.QR.count} pago(s)</div>
+    </div>
+    <div class="pay-summary-card pay-transferencia">
+      <div class="pay-summary-title">🏦 Transferencias</div>
+      <div class="pay-summary-amount">${formatCOP(buckets.TRANSFERENCIA.total)}</div>
+      <div class="pay-summary-count">${buckets.TRANSFERENCIA.count} pago(s)</div>
+    </div>
+    <div class="pay-summary-card pay-online">
+      <div class="pay-summary-title">💳 Pasarela Online</div>
+      <div class="pay-summary-amount">${formatCOP(buckets.ONLINE.total)}</div>
+      <div class="pay-summary-count">${buckets.ONLINE.count} pago(s) (Bold/Wompi)</div>
+    </div>
+  `;
+}
+
+function populateManualServiceDropdown() {
+  const select = document.getElementById('manServicio');
+  const fechaInput = document.getElementById('manFecha');
+  if (fechaInput && !fechaInput.value) {
+    fechaInput.value = getTodayBogotaYmd();
+  }
+  if (!select) return;
+
+  const activos = state.adminServicios.filter((s) => s.activo === 1);
+  const lista = activos.length > 0 ? activos : state.adminServicios;
+  const currentVal = select.value;
+
+  select.innerHTML = lista
+    .map(
+      (s) => `
+      <option value="${s.id}" data-price="${s.precio_cop}">
+        [${escapeHtml(s.categoria || 'General')}] ${escapeHtml(s.nombre)} — ${formatCOP(s.precio_cop)}
+      </option>
+    `
+    )
+    .join('');
+
+  if (currentVal) select.value = currentVal;
+  onManualServiceChange();
+}
+
+function onManualServiceChange() {
+  const select = document.getElementById('manServicio');
+  const montoInput = document.getElementById('manMonto');
+  if (!select || !montoInput) return;
+  const opt = select.options[select.selectedIndex];
+  const price = opt ? Number(opt.dataset.price || 0) : 0;
+  if (price > 0) {
+    montoInput.value = String(price);
+  }
+}
+
+function selectManualPaymentMethod(method) {
+  const hidden = document.getElementById('manMetodoPago');
+  if (hidden) hidden.value = method;
+  document.querySelectorAll('#manMetodoPills .pay-pill').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.method === method);
+  });
+}
+
+async function handleAdminManualBooking(event) {
+  event.preventDefault();
+  const btn = document.getElementById('btnSaveManualBooking');
+  const nombre = document.getElementById('manNombre').value.trim();
+  const telefono = document.getElementById('manTelefono').value.trim();
+  const servicioId = Number(document.getElementById('manServicio').value);
+  const montoTotal = Number(document.getElementById('manMonto').value);
+  const fecha = document.getElementById('manFecha').value;
+  const hora = document.getElementById('manHora').value || '10:00';
+  const metodoPago = document.getElementById('manMetodoPago').value || 'EFECTIVO';
+  const estado = document.getElementById('manEstado').value || 'CONFIRMADA';
+  const referenciaPago = document.getElementById('manReferencia').value.trim();
+  const notificarWpp = Boolean(document.getElementById('manNotificarWpp')?.checked);
+
+  if (!nombre || !servicioId || !fecha || !hora) {
+    alert('Completa el nombre, servicio, fecha y hora.');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Guardando ingreso y bloqueando turno...';
+
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/citas`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${state.adminToken}`,
+      },
+      body: JSON.stringify({
+        cliente_nombre: nombre,
+        cliente_telefono: telefono,
+        servicio_id: servicioId,
+        monto_total: montoTotal,
+        fecha_hora_inicio: `${fecha}T${hora}:00-05:00`,
+        metodo_pago: metodoPago,
+        estado,
+        referencia_pago: referenciaPago,
+        notificar_whatsapp: notificarWpp,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      throw new Error(data.error || 'No se pudo registrar el ingreso manual.');
+    }
+
+    document.getElementById('adminManualBookingForm').reset();
+    document.getElementById('manFecha').value = fecha;
+    document.getElementById('manHora').value = '10:00';
+    selectManualPaymentMethod(metodoPago);
+    alert(`✅ Ingreso registrado correctamente (${metodoPago} · ${formatCOP(data.monto_total)}).`);
+    await loadAdminData();
+    if (window.innerWidth <= 768) {
+      switchAdminSection('turnos');
+    }
+  } catch (err) {
+    alert(`Error: ${err.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '💾 Guardar Ingreso y Bloquear Turno en Agenda';
+  }
+}
+
+async function handleAdminConfirmManualPayment(citaId, metodoPago) {
+  if (
+    !confirm(
+      `¿Confirmar que recibiste el pago de este ticket por ${metodoPago}?\nPasará a CONFIRMADA, sumará en tu caja de ${metodoPago} y avisará a la clienta por WhatsApp.`
+    )
+  ) {
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/api/citas/${encodeURIComponent(citaId)}/confirmar-pago`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${state.adminToken}`,
+      },
+      body: JSON.stringify({ metodo_pago: metodoPago }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      throw new Error(data.error || 'No se pudo confirmar el pago.');
+    }
+    await loadAdminData();
+  } catch (err) {
+    alert(`Error: ${err.message}`);
+  }
+}
+
 function switchAdminSection(section) {
   document.querySelectorAll('.admin-subtab').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.section === section);
   });
 
   const map = {
+    caja: document.getElementById('adminSecCaja'),
     turnos: document.getElementById('adminSecTurnos'),
     chats: document.getElementById('adminSecChats'),
     tickets: document.getElementById('adminSecTickets'),
@@ -835,10 +1030,14 @@ function renderAdminTurnosPorJornada() {
   if (!board) return;
 
   const filtroEstado = document.getElementById('adminFilterEstado')?.value || 'TODOS';
+  const filtroMetodo = document.getElementById('adminFilterMetodo')?.value || 'TODOS';
   const filtroFecha = document.getElementById('adminFilterFecha')?.value || '';
 
   const filtradas = state.adminCitas
     .filter((c) => (filtroEstado === 'TODOS' ? true : c.estado === filtroEstado))
+    .filter((c) =>
+      filtroMetodo === 'TODOS' ? true : classifyPaymentMethod(c.metodo_pago).group === filtroMetodo
+    )
     .filter((c) => {
       if (!filtroFecha) return true;
       const { ymd } = getBogotaHourAndYmd(c.fecha_hora_inicio);
@@ -872,10 +1071,12 @@ function renderAdminTurnosPorJornada() {
           : grupo.items
               .map((c) => {
                 const reembolso80 = c.monto_reembolso_80 || Math.round(c.monto_total * 0.8);
+                const payInfo = classifyPaymentMethod(c.metodo_pago);
                 const waPhone = String(c.cliente_telefono || '').replace(/\D/g, '');
-                const waUrl = waPhone
-                  ? `https://wa.me/${waPhone.startsWith('57') ? waPhone : '57' + waPhone}`
-                  : '#';
+                const waUrl =
+                  waPhone && waPhone !== '0000000000'
+                    ? `https://wa.me/${waPhone.startsWith('57') ? waPhone : '57' + waPhone}`
+                    : '#';
                 return `
                   <div class="ticket-mini-card">
                     <div class="admin-item-header">
@@ -883,9 +1084,14 @@ function renderAdminTurnosPorJornada() {
                       <span class="status-badge status-${escapeHtml(c.estado)}">${escapeHtml(c.estado)}</span>
                     </div>
                     <div style="font-weight:700; margin-top:0.25rem;">💇‍♀️ ${escapeHtml(c.servicio_nombre || 'Servicio')}</div>
-                    <div>👤 ${escapeHtml(c.cliente_nombre)} · <a href="${escapeHtml(waUrl)}" target="_blank" rel="noopener" style="color:#157347; font-weight:700; text-decoration:none;">📲 ${escapeHtml(c.cliente_telefono)}</a></div>
-                    <div style="font-size:0.77rem; color:#667085; margin-top:0.2rem;">
-                      Ticket: <code>#${escapeHtml(c.id.slice(0, 8).toUpperCase())}</code> · Pago: <strong>${formatCOP(c.monto_total)}</strong> (80%: ${formatCOP(reembolso80)})
+                    <div>👤 ${escapeHtml(c.cliente_nombre)} ${
+                      waUrl !== '#'
+                        ? `· <a href="${escapeHtml(waUrl)}" target="_blank" rel="noopener" style="color:#157347; font-weight:700; text-decoration:none;">📲 ${escapeHtml(c.cliente_telefono)}</a>`
+                        : ''
+                    }</div>
+                    <div style="font-size:0.77rem; color:#667085; margin-top:0.3rem; display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap;">
+                      <span class="method-badge ${payInfo.cls}">${payInfo.label}</span>
+                      <span><strong>${formatCOP(c.monto_total)}</strong> (80%: ${formatCOP(reembolso80)})</span>
                     </div>
                   </div>
                 `;
@@ -908,11 +1114,13 @@ function renderAdminTurnosPorJornada() {
 function renderAdminCitas() {
   const container = document.getElementById('adminCitasList');
   const filtro = document.getElementById('adminFilterEstado').value;
+  const filtroMetodo = document.getElementById('adminFilterMetodo')?.value || 'TODOS';
 
-  const lista =
-    filtro === 'TODOS'
-      ? state.adminCitas
-      : state.adminCitas.filter((c) => c.estado === filtro);
+  const lista = state.adminCitas
+    .filter((c) => (filtro === 'TODOS' ? true : c.estado === filtro))
+    .filter((c) =>
+      filtroMetodo === 'TODOS' ? true : classifyPaymentMethod(c.metodo_pago).group === filtroMetodo
+    );
 
   if (lista.length === 0) {
     container.innerHTML = `<div class="empty-state">No hay citas registradas para este filtro.</div>`;
@@ -923,27 +1131,39 @@ function renderAdminCitas() {
     .map((c) => {
       const reembolso80 = c.monto_reembolso_80 || Math.round(c.monto_total * 0.8);
       const retencion20 = c.monto_total - reembolso80;
+      const payInfo = classifyPaymentMethod(c.metodo_pago);
       const canCancel = c.estado === 'CONFIRMADA' || c.estado === 'PENDIENTE_PAGO';
+      const canConfirmManual = c.estado === 'PENDIENTE_PAGO';
       const canMarkRefunded = c.estado === 'REEMBOLSO_MANUAL_PENDIENTE';
 
       return `
         <div class="admin-item">
           <div class="admin-item-header">
             <strong>${escapeHtml(c.cliente_nombre)} (${escapeHtml(c.cliente_telefono)})</strong>
-            <span class="status-badge status-${escapeHtml(c.estado)}">${escapeHtml(c.estado)}</span>
+            <div style="display:flex; gap:0.35rem; align-items:center; flex-wrap:wrap;">
+              <span class="method-badge ${payInfo.cls}">${payInfo.label}</span>
+              <span class="status-badge status-${escapeHtml(c.estado)}">${escapeHtml(c.estado)}</span>
+            </div>
           </div>
           <div>💇‍♀️ <strong>${escapeHtml(c.servicio_nombre || 'Servicio')}</strong> · 🗓️ ${escapeHtml(formatDateTimeLocal(c.fecha_hora_inicio))}</div>
           <div>💳 Total (100%): <strong>${formatCOP(c.monto_total)}</strong> | Retención (20%): <strong>${formatCOP(retencion20)}</strong> | Reembolso (80%): <strong style="color:#185170;">${formatCOP(reembolso80)}</strong></div>
-          <div style="font-size:0.76rem; color:#687082;">Ref Wompi: <code>${escapeHtml(c.wompi_reference || 'N/A')}</code> · ID: <code>${escapeHtml(c.id)}</code></div>
+          <div style="font-size:0.76rem; color:#687082;">Ref: <code>${escapeHtml(c.wompi_reference || 'N/A')}</code> · Nota/Tx: <code>${escapeHtml(c.wompi_transaction_id || 'Pendiente')}</code></div>
           <div class="admin-item-actions">
             ${
+              canConfirmManual
+                ? `<button type="button" class="btn btn-success btn-sm" onclick="handleAdminConfirmManualPayment('${escapeHtml(c.id)}', 'EFECTIVO')">💵 Cobré Efectivo</button>
+                   <button type="button" class="btn btn-primary btn-sm" onclick="handleAdminConfirmManualPayment('${escapeHtml(c.id)}', 'QR')">📲 Cobré QR</button>
+                   <button type="button" class="btn btn-secondary btn-sm" onclick="handleAdminConfirmManualPayment('${escapeHtml(c.id)}', 'TRANSFERENCIA')">🏦 Cobré Transf.</button>`
+                : ''
+            }
+            ${
               c.client_manage_url
-                ? `<button type="button" class="btn btn-secondary btn-sm" onclick="copyTextToClipboard('${escapeHtml(c.client_manage_url)}')">🔗 Copiar Link Clienta</button>`
+                ? `<button type="button" class="btn btn-secondary btn-sm" onclick="copyTextToClipboard('${escapeHtml(c.client_manage_url)}')">🔗 Copiar Ticket</button>`
                 : ''
             }
             ${
               canCancel
-                ? `<button type="button" class="btn btn-danger btn-sm" onclick="handleAdminCancelCita('${escapeHtml(c.id)}', ${reembolso80})">⚠️ Cancelar (Reembolsar 80%: ${formatCOP(reembolso80)})</button>`
+                ? `<button type="button" class="btn btn-danger btn-sm" onclick="handleAdminCancelCita('${escapeHtml(c.id)}', ${reembolso80})">⚠️ Cancelar (80%: ${formatCOP(reembolso80)})</button>`
                 : ''
             }
             ${

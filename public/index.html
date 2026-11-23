@@ -235,13 +235,96 @@
         <!-- 1. Tarjetas de Métricas y Finanzas -->
         <div class="kpi-grid" id="adminKpiGrid"></div>
 
+        <!-- 1B. Resumen de Caja Organizado por Medio de Pago (Efectivo, QR, Transferencia, Online) -->
+        <div class="payment-summary-strip" id="adminPaymentBreakdown"></div>
+
         <!-- Selector rápido de secciones del Panel de Mamá (ideal para celular) -->
         <div class="admin-subtabs" role="tablist" aria-label="Secciones del panel de administración">
           <button type="button" class="admin-subtab active" data-section="all" onclick="switchAdminSection('all')">📋 Todo</button>
           <button type="button" class="admin-subtab" data-section="turnos" onclick="switchAdminSection('turnos')">🌅 Turnos</button>
+          <button type="button" class="admin-subtab" data-section="caja" onclick="switchAdminSection('caja')">💵 Ingreso / QR</button>
           <button type="button" class="admin-subtab" data-section="chats" onclick="switchAdminSection('chats')">💬 Chats</button>
           <button type="button" class="admin-subtab" data-section="tickets" onclick="switchAdminSection('tickets')">🎟️ Tickets</button>
           <button type="button" class="admin-subtab" data-section="servicios" onclick="switchAdminSection('servicios')">✨ Servicios</button>
+        </div>
+
+        <!-- 1C. Registro Manual de Cita e Ingreso (Efectivo / Código QR / Transferencia / WhatsApp Personal) -->
+        <div id="adminSecCaja" class="card card-pink admin-panel-sec" style="margin-bottom: 1.35rem;">
+          <div class="card-header">
+            <div>
+              <h3>💵 Registrar Ingreso o Cita Manual (Efectivo · QR · Transferencia)</h3>
+              <p class="card-subtitle">Cuando te agendan por tu WhatsApp personal o te pagan directo en efectivo, QR o transferencia, regístralo aquí para sumarlo a tu caja y bloquear el turno</p>
+            </div>
+          </div>
+
+          <form id="adminManualBookingForm" class="manual-income-form" onsubmit="handleAdminManualBooking(event)">
+            <div class="form-row">
+              <div class="form-group">
+                <label for="manNombre">Nombre de la Clienta</label>
+                <input type="text" id="manNombre" class="form-control" placeholder="Ej: Laura Martínez" required />
+              </div>
+              <div class="form-group">
+                <label for="manTelefono">WhatsApp Clienta (Opcional)</label>
+                <input type="tel" id="manTelefono" class="form-control" placeholder="Ej: 3105551234" />
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="manServicio">Servicio Realizado / Agendado</label>
+                <select id="manServicio" class="form-control" onchange="onManualServiceChange()" required></select>
+              </div>
+              <div class="form-group">
+                <label for="manMonto">Valor Recibido (COP)</label>
+                <input type="number" id="manMonto" class="form-control" min="1000" step="1000" placeholder="Ej: 120000" required />
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="manFecha">Fecha del Turno</label>
+                <input type="date" id="manFecha" class="form-control" required />
+              </div>
+              <div class="form-group">
+                <label for="manHora">Hora del Turno</label>
+                <input type="time" id="manHora" class="form-control" value="10:00" required />
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Medio de Pago Recibido</label>
+              <div class="payment-method-pills" id="manMetodoPills">
+                <button type="button" class="pay-pill active" data-method="EFECTIVO" onclick="selectManualPaymentMethod('EFECTIVO')">💵 Efectivo</button>
+                <button type="button" class="pay-pill" data-method="QR" onclick="selectManualPaymentMethod('QR')">📲 Código QR</button>
+                <button type="button" class="pay-pill" data-method="TRANSFERENCIA" onclick="selectManualPaymentMethod('TRANSFERENCIA')">🏦 Transferencia</button>
+                <button type="button" class="pay-pill" data-method="BOLD" onclick="selectManualPaymentMethod('BOLD')">💳 Bold / Tarjeta</button>
+              </div>
+              <input type="hidden" id="manMetodoPago" value="EFECTIVO" />
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="manEstado">Estado del Pago</label>
+                <select id="manEstado" class="form-control">
+                  <option value="CONFIRMADA">✅ Pagado y Confirmado (Suma a Caja)</option>
+                  <option value="PENDIENTE_PAGO">⏳ Agendado (Pendiente por Pagar)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="manReferencia">Nota / # Comprobante QR o Transferencia (Opcional)</label>
+                <input type="text" id="manReferencia" class="form-control" placeholder="Ej: QR Nequi #8421 / Efectivo completo" />
+              </div>
+            </div>
+
+            <label class="checkbox-inline">
+              <input type="checkbox" id="manNotificarWpp" checked />
+              <span>Enviar confirmación del ticket al WhatsApp de la clienta (si ingresaste su número)</span>
+            </label>
+
+            <button type="submit" id="btnSaveManualBooking" class="btn btn-primary btn-block btn-animated" style="margin-top:0.85rem;">
+              💾 Guardar Ingreso y Bloquear Turno en Agenda
+            </button>
+          </form>
         </div>
 
         <!-- 2. Tablero Visual de Turnos / Tickets por Jornada (Mañana, Mediodía, Tarde) -->
@@ -261,6 +344,13 @@
                 <option value="REEMBOLSO_MANUAL_PENDIENTE">⚠️ Reembolso 80% Pendiente</option>
                 <option value="REEMBOLSADA">🔄 Reembolsadas (80%)</option>
                 <option value="CANCELADA">❌ Canceladas</option>
+              </select>
+              <select id="adminFilterMetodo" class="form-control select-sm" onchange="renderAdminTurnosPorJornada(); renderAdminCitas();">
+                <option value="TODOS">Todos los medios de pago</option>
+                <option value="EFECTIVO">💵 Efectivo</option>
+                <option value="QR">📲 Código QR</option>
+                <option value="TRANSFERENCIA">🏦 Transferencia</option>
+                <option value="ONLINE">💳 Online (Bold / Wompi)</option>
               </select>
             </div>
           </div>

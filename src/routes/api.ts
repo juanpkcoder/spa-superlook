@@ -604,6 +604,234 @@ apiRoutes.get('/citas', async (c) => {
 });
 
 /**
+ * POST /api/admin/citas
+ * PROTEGIDO (Solo Admin): Permite a Mamá registrar manualmente una cita y/o ingreso
+ * agendado por su WhatsApp personal o presencialmente (Efectivo, QR, Transferencia o Bold),
+ * bloqueando automáticamente el horario en la agenda para evitar dobles reservas.
+ */
+apiRoutes.post('/admin/citas', async (c) => {
+  const isAdmin = await isValidAdminRequest(c);
+  if (!isAdmin) {
+    return c.json({ ok: false, error: 'No autorizado.' }, 401);
+  }
+
+  let body: {
+    cliente_nombre?: string;
+    cliente_telefono?: string;
+    servicio_id?: number;
+    fecha_hora_inicio?: string;
+    metodo_pago?: string;
+    estado?: string;
+    monto_total?: number;
+    referencia_pago?: string;
+    notificar_whatsapp?: boolean;
+  };
+
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ ok: false, error: 'Cuerpo JSON inválido' }, 400);
+  }
+
+  const clienteNombre = (body.cliente_nombre || '').trim();
+  const clienteTelefono = (body.cliente_telefono || '').replace(/\D/g, '') || '0000000000';
+  const servicioId = Number(body.servicio_id);
+  const fechaHoraInicioRaw = (body.fecha_hora_inicio || '').trim();
+  const metodoPagoRaw = (body.metodo_pago || 'EFECTIVO').trim().toUpperCase();
+  const metodosPermitidos = ['EFECTIVO', 'QR', 'TRANSFERENCIA', 'BOLD', 'WOMPI'];
+  const metodoPago = metodosPermitidos.includes(metodoPagoRaw) ? metodoPagoRaw : 'EFECTIVO';
+  const estado = body.estado === 'PENDIENTE_PAGO' ? 'PENDIENTE_PAGO' : 'CONFIRMADA';
+
+  if (!clienteNombre || !servicioId || !fechaHoraInicioRaw) {
+    return c.json(
+      {
+        ok: false,
+        error: 'Nombre de clienta, servicio y fecha/hora de inicio son obligatorios.',
+      },
+      400
+    );
+  }
+
+  const servicio = await c.env.DB.prepare(
+    'SELECT id, categoria, nombre, duracion_minutos, precio_cop FROM servicios WHERE id = ?1'
+  )
+    .bind(servicioId)
+    .first<ServicioRow>();
+
+  if (!servicio) {
+    return c.json({ ok: false, error: 'Servicio no encontrado.' }, 404);
+  }
+
+  const startDate = new Date(fechaHoraInicioRaw);
+  if (Number.isNaN(startDate.getTime())) {
+    return c.json({ ok: false, error: 'Fecha y hora inválidas.' }, 400);
+  }
+
+  const fechaHoraInicio = startDate.toISOString();
+  const fechaHoraFin = new Date(
+    startDate.getTime() + servicio.duracion_minutos * 60 * 1000
+  ).toISOString();
+
+  const montoCustom = Number(body.monto_total);
+  const montoTotal =
+    Number.isFinite(montoCustom) && montoCustom > 0 ? Math.round(montoCustom) : servicio.precio_cop;
+  const montoReembolso80 = Math.round(montoTotal * 0.8);
+  const citaId = crypto.randomUUID();
+  const createdAt = new Date().toISOString();
+  const refPrefix =
+    metodoPago === 'EFECTIVO'
+      ? 'EFE'
+      : metodoPago === 'QR'
+        ? 'QRS'
+        : metodoPago === 'TRANSFERENCIA'
+          ? 'TRF'
+          : 'MAN';
+  const wompiReference = `${refPrefix}-${citaId.slice(0, 8).toUpperCase()}-${Date.now().toString(36).toUpperCase()}`;
+  const txId = (body.referencia_pago || '').trim() || `MANUAL-${metodoPago}`;
+
+  await c.env.DB.prepare(
+    `INSERT INTO citas (
+      id,
+      cliente_nombre,
+      cliente_telefono,
+      servicio_id,
+      fecha_hora_inicio,
+      fecha_hora_fin,
+      estado,
+      monto_total,
+      monto_reembolso_80,
+      wompi_reference,
+      wompi_transaction_id,
+      metodo_pago,
+      recordatorio_24h,
+      recordatorio_2h,
+      created_at
+    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, 0, ?13)`
+  )
+    .bind(
+      citaId,
+      clienteNombre,
+      clienteTelefono,
+      servicio.id,
+      fechaHoraInicio,
+      fechaHoraFin,
+      estado,
+      montoTotal,
+      montoReembolso80,
+      wompiReference,
+      txId,
+      metodoPago,
+      createdAt
+    )
+    .run();
+
+  const { url: citaManageUrl } = await buildClientCitaUrl(c.env, citaId);
+
+  if (body.notificar_whatsapp && clienteTelefono !== '0000000000') {
+    const labelMetodo =
+      metodoPago === 'EFECTIVO'
+        ? 'Efectivo'
+        : metodoPago === 'QR'
+          ? 'Pago con Código QR'
+          : metodoPago === 'TRANSFERENCIA'
+            ? 'Transferencia'
+            : metodoPago;
+
+    const msg =
+      `✅ *${NOMBRE_OFICIAL_NEGOCIO} - Reserva ${estado === 'CONFIRMADA' ? 'Confirmada' : 'Agendada'}*\n\n` +
+      `Hola *${clienteNombre}*, registramos tu turno:\n` +
+      `• *Servicio:* ${servicio.nombre}\n` +
+      `• *Fecha/Hora:* ${fechaHoraInicio}\n` +
+      `• *Valor:* ${formatCOP(montoTotal)} (${labelMetodo})\n` +
+      `• *Tu ticket privado:* ${citaManageUrl}\n\n` +
+      `📌 ${TEXTO_LEGAL_RETENCION_20} (Reembolso 80%: ${formatCOP(montoReembolso80)}).`;
+
+    sendWhatsAppText(c.env, clienteTelefono, msg).catch(() => {});
+  }
+
+  return c.json(
+    {
+      ok: true,
+      cita_id: citaId,
+      estado,
+      metodo_pago: metodoPago,
+      monto_total: montoTotal,
+      monto_reembolso_80: montoReembolso80,
+      wompi_reference: wompiReference,
+      client_manage_url: citaManageUrl,
+    },
+    201
+  );
+});
+
+/**
+ * POST /api/citas/:id/confirmar-pago
+ * PROTEGIDO (Solo Admin): Confirma manualmente un ticket PENDIENTE_PAGO registrando
+ * si la clienta pagó en EFECTIVO, QR o TRANSFERENCIA.
+ */
+apiRoutes.post('/citas/:id/confirmar-pago', async (c) => {
+  const isAdmin = await isValidAdminRequest(c);
+  if (!isAdmin) {
+    return c.json({ ok: false, error: 'No autorizado.' }, 401);
+  }
+
+  const citaId = c.req.param('id');
+  let body: { metodo_pago?: string; referencia_pago?: string };
+  try {
+    body = await c.req.json();
+  } catch {
+    body = {};
+  }
+
+  const metodoRaw = (body.metodo_pago || 'EFECTIVO').trim().toUpperCase();
+  const metodosPermitidos = ['EFECTIVO', 'QR', 'TRANSFERENCIA', 'BOLD', 'WOMPI'];
+  const metodoPago = metodosPermitidos.includes(metodoRaw) ? metodoRaw : 'EFECTIVO';
+  const refPago = (body.referencia_pago || '').trim() || `MANUAL-${metodoPago}`;
+
+  const cita = await c.env.DB.prepare(
+    `SELECT c.*, s.nombre AS servicio_nombre
+     FROM citas c
+     LEFT JOIN servicios s ON s.id = c.servicio_id
+     WHERE c.id = ?1`
+  )
+    .bind(citaId)
+    .first<CitaConServicioRow>();
+
+  if (!cita) {
+    return c.json({ ok: false, error: 'Cita no encontrada.' }, 404);
+  }
+
+  await c.env.DB.prepare(
+    `UPDATE citas
+     SET estado = 'CONFIRMADA',
+         metodo_pago = ?1,
+         wompi_transaction_id = ?2
+     WHERE id = ?3`
+  )
+    .bind(metodoPago, refPago, citaId)
+    .run();
+
+  if (cita.cliente_telefono && cita.cliente_telefono !== '0000000000') {
+    const { url: citaManageUrl } = await buildClientCitaUrl(c.env, cita.id);
+    const servicioNombre = cita.servicio_nombre || `Servicio #${cita.servicio_id}`;
+    sendWhatsAppText(
+      c.env,
+      cita.cliente_telefono,
+      `✅ *${NOMBRE_OFICIAL_NEGOCIO} - Pago Confirmado (${metodoPago})*\n` +
+        `Hola *${cita.cliente_nombre}*, tu cita de *${servicioNombre}* (${cita.fecha_hora_inicio}) por *${formatCOP(cita.monto_total)}* ya quedó confirmada.\n` +
+        `🎟️ Tu ticket privado: ${citaManageUrl}`
+    ).catch(() => {});
+  }
+
+  return c.json({
+    ok: true,
+    cita_id: citaId,
+    nuevo_estado: 'CONFIRMADA',
+    metodo_pago: metodoPago,
+  });
+});
+
+/**
  * POST /api/citas/:id/reembolsar
  * PROTEGIDO (Solo Admin): Marca una cita en REEMBOLSO_MANUAL_PENDIENTE como REEMBOLSADA
  * cuando la mamá ya realizó la devolución del 80% a la clienta.
