@@ -12,7 +12,13 @@ import {
 import { createWompiPaymentLink } from '../services/wompi';
 import { createBoldPaymentLink } from '../services/bold';
 import { sendWhatsAppText } from '../services/whatsapp';
-import { calcularBloquesDisponibles, parseChatSession } from '../services/gemini-bot';
+import {
+  calcularBloquesDisponibles,
+  ChatTurn,
+  handleWebChatMessage,
+  parseChatSession,
+  sendQuoteAlertToAdmin,
+} from '../services/gemini-bot';
 import {
   buildClientCitaUrl,
   checkRateLimit,
@@ -114,6 +120,154 @@ apiRoutes.get('/servicios', async (c) => {
     politica_cancelacion: TEXTO_LEGAL_RETENCION_20,
     servicios: results || [],
   });
+});
+
+/**
+ * POST /api/chat-web
+ * Asistente IA híbrido en la página web (mismo cerebro Gemini de Spa Superlook):
+ * saluda con personalidad, cotiza diseños de uñas/cabello (avisando a Mamá),
+ * consulta disponibilidad en vivo y puede emitir links de pago Bold sincronizados.
+ */
+apiRoutes.post('/chat-web', async (c) => {
+  const ip = getClientIp(c);
+  const rl = checkRateLimit(`chat-web:${ip}`, 30, 5 * 60 * 1000);
+  if (!rl.allowed) {
+    return c.json(
+      {
+        ok: false,
+        error: `Demasiados mensajes seguidos. Intenta en ${rl.retryAfterSec} segundos.`,
+      },
+      429
+    );
+  }
+
+  let body: { message?: string; history?: ChatTurn[]; cliente_telefono?: string };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ ok: false, error: 'Cuerpo JSON inválido' }, 400);
+  }
+
+  const message = (body.message || '').trim();
+  if (!message) {
+    return c.json({ ok: false, error: 'Escribe un mensaje para conversar con el asistente.' }, 400);
+  }
+
+  const reply = await handleWebChatMessage(
+    c.env,
+    body.history || [],
+    message,
+    (body.cliente_telefono || '').replace(/\D/g, '')
+  );
+
+  return c.json({
+    ok: true,
+    reply,
+  });
+});
+
+/**
+ * POST /api/cotizaciones
+ * Cotizador dedicado en la página web para diseños personalizados de uñas, colorimetría,
+ * cabello, keratina, maquillaje, etc. Envía alerta inmediata al WhatsApp de Mamá (ADMIN_PHONE)
+ * y confirmación a la clienta desde el WhatsApp oficial (+57 312 459 7896).
+ */
+apiRoutes.post('/cotizaciones', async (c) => {
+  const ip = getClientIp(c);
+  const rl = checkRateLimit(`cotizaciones:${ip}`, 15, 5 * 60 * 1000);
+  if (!rl.allowed) {
+    return c.json(
+      {
+        ok: false,
+        error: `Has enviado varias cotizaciones seguidas. Intenta en ${rl.retryAfterSec} segundos.`,
+      },
+      429
+    );
+  }
+
+  let body: {
+    cliente_nombre?: string;
+    cliente_telefono?: string;
+    categoria?: string;
+    descripcion_diseno?: string;
+    fecha_tentativa?: string;
+  };
+
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ ok: false, error: 'Cuerpo JSON inválido' }, 400);
+  }
+
+  const clienteNombre = (body.cliente_nombre || '').trim();
+  const clienteTelefono = (body.cliente_telefono || '').replace(/\D/g, '');
+  const categoria = (body.categoria || 'Diseño Personalizado').trim();
+  const descripcionDiseno = (body.descripcion_diseno || '').trim();
+  const fechaTentativa = (body.fecha_tentativa || '').trim();
+
+  if (!clienteNombre || !clienteTelefono || !descripcionDiseno) {
+    return c.json(
+      {
+        ok: false,
+        error: 'Nombre, WhatsApp y descripción del diseño/cabello son obligatorios.',
+      },
+      400
+    );
+  }
+
+  // Buscar rango orientativo en el catálogo activo según la categoría
+  const { results: srvList } = await c.env.DB.prepare(
+    'SELECT categoria, nombre, precio_cop FROM servicios WHERE activo = 1 ORDER BY precio_cop ASC'
+  ).all<Pick<ServicioRow, 'categoria' | 'nombre' | 'precio_cop'>>();
+
+  const catLower = categoria.toLowerCase();
+  const matched = (srvList || []).filter(
+    (s) =>
+      (s.categoria || '').toLowerCase().includes(catLower.split(' ')[0]) ||
+      s.nombre.toLowerCase().includes(catLower.split(' ')[0])
+  );
+  const refList = matched.length > 0 ? matched : srvList || [];
+  let estimadoOrientativo = 'Cotización personalizada según valoración de nuestra especialista';
+  if (refList.length > 0) {
+    const minP = refList[0].precio_cop;
+    const maxP = refList[refList.length - 1].precio_cop;
+    estimadoOrientativo =
+      minP === maxP
+        ? `Base referencial desde ${formatCOP(minP)}`
+        : `Referencia en catálogo entre ${formatCOP(minP)} y ${formatCOP(maxP)}`;
+  }
+
+  await sendQuoteAlertToAdmin(c.env, {
+    origen: 'Página Web',
+    clienteNombre,
+    clienteTelefono,
+    categoria,
+    descripcionDiseno,
+    estimadoOrientativo,
+    fechaTentativa,
+  });
+
+  // Confirmar también por WhatsApp a la clienta desde +57 312 459 7896
+  sendWhatsAppText(
+    c.env,
+    clienteTelefono,
+    `✨ *¡Hola ${clienteNombre}! Recibimos tu solicitud de cotización en ${NOMBRE_OFICIAL_NEGOCIO}* 🌸\n\n` +
+      `• *Categoría:* ${categoria}\n` +
+      `• *Tu solicitud:* ${descripcionDiseno}\n` +
+      `• *Referencia:* ${estimadoOrientativo}\n\n` +
+      `Ya le enviamos el aviso a nuestra especialista para confirmarte el valor exacto y ayudarte a agendar tu turno. Si tienes una foto de inspiración, ¡puedes enviárnosla aquí mismo por este chat! 📸💅💇‍♀️`
+  ).catch(() => {});
+
+  return c.json(
+    {
+      ok: true,
+      estimado_orientativo: estimadoOrientativo,
+      especialista_notificada: Boolean(c.env.ADMIN_PHONE),
+      mensaje:
+        '¡Listo! Ya enviamos los detalles de tu diseño directamente al WhatsApp de nuestra especialista y te confirmamos por WhatsApp.',
+    },
+    201
+  );
 });
 
 /**

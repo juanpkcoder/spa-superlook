@@ -66,7 +66,7 @@ interface GeminiResponse {
  * Calcula los bloques horarios disponibles en una fecha dada (YYYY-MM-DD)
  * filtrando citas en estado CONFIRMADA o PENDIENTE_PAGO creadas hace menos de 20 minutos.
  * Spa Superlook trabaja ÚNICAMENTE bajo reserva previa; la disponibilidad depende de las citas
- * ya reservadas en D1 dentro de la franja operativa de agendamiento.
+ * ya reservadas en D1 / Supabase dentro de la franja operativa de agendamiento.
  */
 export async function calcularBloquesDisponibles(
   db: D1Database,
@@ -119,11 +119,51 @@ export async function calcularBloquesDisponibles(
 }
 
 /**
- * Ejecuta las herramientas (Function Calling) invocadas por Gemini.
+ * Envía una alerta estructurada al WhatsApp personal de Mamá (ADMIN_PHONE)
+ * cuando una clienta solicita cotizar un diseño de uñas, colorimetría, cabello o servicio especial.
+ */
+export async function sendQuoteAlertToAdmin(
+  env: Env,
+  params: {
+    origen: 'WhatsApp Bot' | 'Página Web';
+    clienteNombre: string;
+    clienteTelefono: string;
+    categoria: string;
+    descripcionDiseno: string;
+    estimadoOrientativo?: string;
+    fechaTentativa?: string;
+  }
+): Promise<{ ok: boolean }> {
+  const cleanPhone = (params.clienteTelefono || '').replace(/\D/g, '');
+  const fullPhone =
+    cleanPhone.length === 10 && cleanPhone.startsWith('3') ? `57${cleanPhone}` : cleanPhone;
+  const waDirectLink = fullPhone ? `https://wa.me/${fullPhone}` : 'No proporcionado';
+
+  const adminMsg =
+    `💅✨ *[${NOMBRE_OFICIAL_NEGOCIO} - Nueva Cotización de Diseño / Servicio]*\n` +
+    `• *Origen:* ${params.origen}\n` +
+    `• *Clienta:* ${params.clienteNombre}\n` +
+    `• *WhatsApp:* ${fullPhone ? '+' + fullPhone : 'No indicado'}\n` +
+    `• *Responder directo:* ${waDirectLink}\n` +
+    `• *Categoría:* ${params.categoria}\n` +
+    `• *Detalle / Diseño solicitado:* ${params.descripcionDiseno}\n` +
+    (params.fechaTentativa ? `• *Fecha tentativa:* ${params.fechaTentativa}\n` : '') +
+    (params.estimadoOrientativo ? `• *Referencia catálogo:* ${params.estimadoOrientativo}\n` : '') +
+    `\n💡 Puedes responderle directo desde tu Panel Privado (${env.DASHBOARD_URL || 'https://spa-superlook.vercel.app'}/?admin=1) o tocando el enlace de WhatsApp.`;
+
+  if (env.ADMIN_PHONE) {
+    await sendWhatsAppText(env, env.ADMIN_PHONE, adminMsg);
+  }
+  return { ok: true };
+}
+
+/**
+ * Ejecuta las herramientas (Function Calling) invocadas por Gemini tanto desde WhatsApp como desde la Web.
  */
 async function executeBotTool(
   env: Env,
   fromPhone: string,
+  origin: 'WhatsApp Bot' | 'Página Web',
   call: GeminiFunctionCall
 ): Promise<Record<string, unknown>> {
   if (call.name === 'listar_servicios') {
@@ -133,6 +173,7 @@ async function executeBotTool(
 
     return {
       negocio: NOMBRE_OFICIAL_NEGOCIO,
+      web_oficial: env.DASHBOARD_URL || 'https://spa-superlook.vercel.app',
       modalidad_atencion: MODALIDAD_ATENCION_RESERVA,
       servicios: (results || []).map((s) => ({
         id: s.id,
@@ -172,10 +213,54 @@ async function executeBotTool(
     };
   }
 
+  if (call.name === 'solicitar_cotizacion_personalizada') {
+    const clienteNombre = String(call.args.cliente_nombre || 'Clienta interesada').trim();
+    const telefonoArgs = String(call.args.cliente_telefono || fromPhone || '').replace(/\D/g, '');
+    const categoria = String(call.args.categoria || 'Diseño Personalizado').trim();
+    const descripcionDiseno = String(call.args.descripcion_diseno || '').trim();
+    const fechaTentativa = call.args.fecha_tentativa ? String(call.args.fecha_tentativa).trim() : '';
+    const estimadoOrientativo = call.args.estimado_orientativo
+      ? String(call.args.estimado_orientativo).trim()
+      : '';
+
+    if (!descripcionDiseno) {
+      return {
+        ok: false,
+        error: 'Pídele a la clienta los detalles del diseño de uñas o trabajo en el cabello (largo, tono, técnica o estilo) antes de enviar la cotización.',
+      };
+    }
+
+    await sendQuoteAlertToAdmin(env, {
+      origen: origin,
+      clienteNombre,
+      clienteTelefono: telefonoArgs,
+      categoria,
+      descripcionDiseno,
+      estimadoOrientativo,
+      fechaTentativa,
+    });
+
+    return {
+      ok: true,
+      especialista_notificada: true,
+      mensaje_confirmacion:
+        'Solicitud de cotización enviada con éxito a nuestra especialista de Spa Superlook. Ella revisará los detalles de tu diseño y te confirmará el valor exacto muy pronto.',
+      web_citas: env.DASHBOARD_URL || 'https://spa-superlook.vercel.app',
+    };
+  }
+
   if (call.name === 'crear_reserva_con_pago') {
-    const clienteNombre = String(call.args.cliente_nombre || 'Clienta WhatsApp').trim();
+    const clienteNombre = String(call.args.cliente_nombre || 'Clienta Spa Superlook').trim();
+    const clienteTelefono = String(call.args.cliente_telefono || fromPhone || '').replace(/\D/g, '');
     const servicioId = Number(call.args.servicio_id || 1);
     const fechaHoraInicioRaw = String(call.args.fecha_hora_inicio || '').trim();
+
+    if (!clienteTelefono || clienteTelefono.length < 10) {
+      return {
+        ok: false,
+        error: 'Necesito el número de WhatsApp de la clienta (10 dígitos en Colombia) para emitir su ticket oficial y enviarle el link de pago.',
+      };
+    }
 
     const servicio = await env.DB.prepare(
       'SELECT id, categoria, nombre, duracion_minutos, precio_cop FROM servicios WHERE id = ?1 AND activo = 1'
@@ -201,7 +286,7 @@ async function executeBotTool(
     ).toISOString();
     const cutoff20MinAgo = new Date(Date.now() - 20 * 60 * 1000).toISOString();
 
-    // REQUISITO 3D: Verificar solapamiento de horarios justo antes de insertar en D1
+    // REQUISITO 3D: Verificar solapamiento de horarios justo antes de insertar en D1/Supabase
     const conflicto = await env.DB.prepare(
       `SELECT id, estado FROM citas
        WHERE fecha_hora_inicio < ?1
@@ -241,7 +326,7 @@ async function executeBotTool(
       .bind(
         citaId,
         clienteNombre,
-        fromPhone,
+        clienteTelefono,
         servicio.id,
         fechaHoraInicioIso,
         fechaHoraFinIso,
@@ -262,7 +347,7 @@ async function executeBotTool(
           amountCop: montoTotal,
           serviceName: servicio.nombre,
           customerName: clienteNombre,
-          customerPhone: fromPhone,
+          customerPhone: clienteTelefono,
           redirectUrl: linkGestionCita,
         })
       : await createWompiPaymentLink(env, {
@@ -270,7 +355,7 @@ async function executeBotTool(
           amountCop: montoTotal,
           serviceName: servicio.nombre,
           customerName: clienteNombre,
-          customerPhone: fromPhone,
+          customerPhone: clienteTelefono,
           redirectUrl: linkGestionCita,
         });
 
@@ -303,16 +388,227 @@ async function executeBotTool(
   return { error: `Función desconocida: ${call.name}` };
 }
 
+function buildSystemInstruction(env: Env, origin: 'WhatsApp Bot' | 'Página Web'): string {
+  const todayBogota = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const webUrl = env.DASHBOARD_URL || 'https://spa-superlook.vercel.app';
+
+  return `Eres **Superlook Concierge**, la anfitriona y asesora virtual oficial de **"${NOMBRE_OFICIAL_NEGOCIO}"** en Colombia ✨🌸.
+Canal actual de conversación: ${origin}.
+Fecha actual de referencia (Colombia UTC-5): ${todayBogota}.
+Web oficial de citas (híbrida y sincronizada en tiempo real con este chat): ${webUrl}.
+
+TU PERSONALIDAD Y ESTILO DE SALUDO:
+- Eres cálida, cercana, elegante, empática y con el encanto acogedor de un spa boutique colombiano.
+- Cuando te saluden por primera vez (ej. "Hola", "Buenas", "Info"), da una bienvenida memorable, amable y llena de energía positiva (ej: "¡Hola hermosa! ✨ Qué alegría saludarte, bienvenida a *Spa Superlook* 🌸💇‍♀️💅") y presenta de forma clara y ordenada cómo puedes consentirla hoy:
+  1) Ver el catálogo de servicios y precios 💅
+  2) Agendar tu cita directamente por aquí (y queda subida al instante en nuestra agenda oficial) o si prefieres desde nuestra web ${webUrl} 🗓️
+  3) Cotizar un diseño personalizado de uñas, balayage, tintura, keratina o arreglo especial para el cabello 🎨✨
+- Usa emojis con buen gusto (sin exagerar), frases claras y párrafos cortos fáciles de leer en celular.
+
+REGLAS OBLIGATORIAS DEL NEGOCIO:
+1. Nombre oficial: ${NOMBRE_OFICIAL_NEGOCIO}.
+2. Modalidad híbrida y solo bajo reserva previa: Atendemos ÚNICAMENTE bajo reserva previa confirmada (no trabajamos sin cita). Todo lo que agendes por este chat se sincroniza al instante con nuestra plataforma web (${webUrl}) y viceversa.
+3. Pago anticipado automático con Bold: Toda cita requiere el pago anticipado del 100% mediante el link seguro de pago en línea (Bold: Nequi, PSE, Bancolombia, Tarjetas y QR) que generas automáticamente con \`crear_reserva_con_pago\`. El bloqueo temporal dura 20 minutos mientras realiza el pago.
+4. Política obligatoria de cancelación (DEBES informarla siempre al cotizar un servicio de catálogo o crear una reserva): En caso de cancelación, ${NOMBRE_OFICIAL_NEGOCIO} reembolsa el 80% del valor pagado y retiene el 20% por gastos administrativos y reserva de agenda (${TEXTO_LEGAL_RETENCION_20}).
+5. COTIZACIONES PERSONALIZADAS DE UÑAS Y CABELLO:
+   - Si una clienta quiere cotizar un diseño especial de uñas (acrílicas, press-on, semipermanente con diseño/pedrería, manicure ruso) o un trabajo para el cabello (balayage, iluminación, tintura, keratina, alisado, corte, peinado o maquillaje):
+     a) Consulta primero \`listar_servicios\` para darle precios base de referencia si aplica.
+     b) Pregúntale brevemente (si aún no lo dijo) los detalles clave para nuestra estilista: qué diseño o tono desea, largo/abundancia del cabello (o largo/técnica de uñas), su nombre y (si está en la web) su WhatsApp.
+     c) Apenas tengas esos detalles (o si ya te los dio o envió una foto de referencia), llama INMEDIATAMENTE a \`solicitar_cotizacion_personalizada\` para avisar en tiempo real a nuestra especialista (dueña de Spa Superlook) por WhatsApp y darle una atención rápida y precisa!
+6. Enlace seguro de la cita: Cuando ejecutes \`crear_reserva_con_pago\`, entrégale siempre tanto el \`payment_link\` automático de Bold como su enlace privado firmado \`link_gestion_cita\`.`;
+}
+
+function getToolsDeclaration() {
+  return [
+    {
+      functionDeclarations: [
+        {
+          name: 'listar_servicios',
+          description:
+            'Devuelve el catálogo de servicios activos de Spa Superlook con categoría, precios en COP, duración y cálculo del 80% de reembolso.',
+        },
+        {
+          name: 'consultar_disponibilidad',
+          description:
+            'Consulta los bloques horarios disponibles bajo reserva previa para una fecha (YYYY-MM-DD) y un servicio_id.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              fecha: { type: 'STRING', description: 'Fecha en formato YYYY-MM-DD' },
+              servicio_id: { type: 'INTEGER', description: 'ID numérico del servicio' },
+            },
+            required: ['fecha', 'servicio_id'],
+          },
+        },
+        {
+          name: 'solicitar_cotizacion_personalizada',
+          description:
+            'Envía una alerta inmediata por WhatsApp a la especialista/dueña de Spa Superlook cuando la clienta quiere cotizar un diseño personalizado de uñas, trabajo de colorimetría/balayage/cabello, keratina, maquillaje o servicio especial.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              cliente_nombre: { type: 'STRING', description: 'Nombre de la clienta' },
+              cliente_telefono: {
+                type: 'STRING',
+                description: 'Número de WhatsApp de la clienta (10 dígitos o con 57)',
+              },
+              categoria: {
+                type: 'STRING',
+                description: 'Ej: Uñas & Nail Art, Cabello & Colorimetría, Alisados / Keratina, Maquillaje / Peinado, Facial / Spa',
+              },
+              descripcion_diseno: {
+                type: 'STRING',
+                description:
+                  'Descripción detallada del diseño de uñas o procedimiento de cabello deseado (largo, tono, técnica, estado actual, etc.)',
+              },
+              estimado_orientativo: {
+                type: 'STRING',
+                description: 'Rango orientativo en COP basado en el catálogo si aplica (opcional)',
+              },
+              fecha_tentativa: {
+                type: 'STRING',
+                description: 'Fecha o jornada aproximada en que le gustaría agendar (opcional)',
+              },
+            },
+            required: ['cliente_nombre', 'categoria', 'descripcion_diseno'],
+          },
+        },
+        {
+          name: 'crear_reserva_con_pago',
+          description:
+            'Verifica que no exista solapamiento, crea la cita en estado PENDIENTE_PAGO en la agenda híbrida, genera el link automático de pago en Bold y devuelve el link privado firmado de la cita.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              cliente_nombre: { type: 'STRING', description: 'Nombre completo de la clienta' },
+              cliente_telefono: {
+                type: 'STRING',
+                description: 'WhatsApp de la clienta (requerido especialmente desde la web)',
+              },
+              servicio_id: { type: 'INTEGER', description: 'ID numérico del servicio elegido' },
+              fecha_hora_inicio: {
+                type: 'STRING',
+                description:
+                  'Fecha y hora de inicio en formato ISO8601 con zona -05:00 (ej. 2026-11-22T10:00:00-05:00)',
+              },
+            },
+            required: ['cliente_nombre', 'servicio_id', 'fecha_hora_inicio'],
+          },
+        },
+      ],
+    },
+  ];
+}
+
+async function runGeminiConversation(
+  env: Env,
+  history: ChatTurn[],
+  fromPhone: string,
+  origin: 'WhatsApp Bot' | 'Página Web'
+): Promise<string> {
+  if (!env.GEMINI_API_KEY) {
+    return '';
+  }
+
+  try {
+    const systemInstruction = buildSystemInstruction(env, origin);
+    const toolsDeclaration = getToolsDeclaration();
+    const contents: Array<Record<string, unknown>> = history.map((turn) => ({
+      role: turn.role,
+      parts: [{ text: turn.text }],
+    }));
+
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${env.GEMINI_API_KEY}`;
+
+    // Soportar hasta 2 rondas de Function Calling (ej. listar_servicios -> consultar_disponibilidad o cotizar)
+    for (let step = 0; step < 2; step++) {
+      const res = await fetch(geminiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemInstruction }] },
+          contents,
+          tools: toolsDeclaration,
+        }),
+      });
+
+      if (!res.ok) {
+        console.error('Gemini API HTTP error:', res.status, await res.text());
+        break;
+      }
+
+      const json = (await res.json()) as GeminiResponse;
+      const parts = json.candidates?.[0]?.content?.parts || [];
+      const fnCallPart = parts.find((p) => p.functionCall);
+
+      if (fnCallPart?.functionCall) {
+        const toolResult = await executeBotTool(env, fromPhone, origin, fnCallPart.functionCall);
+        contents.push({
+          role: 'model',
+          parts: [{ functionCall: fnCallPart.functionCall }],
+        });
+        contents.push({
+          role: 'function',
+          parts: [
+            {
+              functionResponse: {
+                name: fnCallPart.functionCall.name,
+                response: toolResult,
+              },
+            },
+          ],
+        });
+        continue;
+      }
+
+      const textReply = parts
+        .map((p) => p.text || '')
+        .join('\n')
+        .trim();
+      if (textReply) {
+        return textReply;
+      }
+      break;
+    }
+  } catch (err) {
+    console.error('Error en llamada a Gemini API:', err);
+  }
+
+  return '';
+}
+
+async function buildFallbackGreeting(env: Env): Promise<string> {
+  const { results: servicios } = await env.DB.prepare(
+    'SELECT id, categoria, nombre, duracion_minutos, precio_cop FROM servicios WHERE activo = 1 ORDER BY categoria ASC, id ASC'
+  ).all<ServicioRow>();
+
+  const listado = (servicios || [])
+    .map(
+      (s) =>
+        `• *${s.id}. [${s.categoria || 'General'}] ${s.nombre}* (${s.duracion_minutos} min) — ${formatCOP(s.precio_cop)}`
+    )
+    .join('\n');
+
+  const webUrl = env.DASHBOARD_URL || 'https://spa-superlook.vercel.app';
+
+  return (
+    `✨ *¡Hola hermosa! Qué alegría saludarte, bienvenida a ${NOMBRE_OFICIAL_NEGOCIO}* 🌸💇‍♀️💅\n\n` +
+    `Estamos listas para consentirte. Atendemos *ÚNICAMENTE bajo reserva previa* y puedes agendar aquí mismo por el chat o en nuestra web oficial (${webUrl}) — ¡todo queda sincronizado al instante!\n\n` +
+    `📋 *Servicios destacados:*\n${listado}\n\n` +
+    `🎨 ¿Quieres *cotizar un diseño de uñas o algo especial para tu cabello*? Cuéntame qué estilo tienes en mente (o envíame una foto de referencia) y le aviso de inmediato a nuestra especialista.\n\n` +
+    `📌 *${TEXTO_LEGAL_RETENCION_20}*`
+  );
+}
+
 /**
  * Procesa el mensaje entrante de WhatsApp utilizando Gemini con Function Calling
- * y persiste la sesión en la tabla `chat_sesiones` de D1.
+ * y persiste la sesión en la tabla `chat_sesiones` de D1 / Supabase.
  */
 export async function handleIncomingWhatsAppMessage(
   env: Env,
   fromPhone: string,
   incomingText: string
 ): Promise<string> {
-  // 1. Cargar historial de la sesión desde D1 / Supabase
   const existingSession = await env.DB.prepare(
     'SELECT telefono, historial_json, updated_at FROM chat_sesiones WHERE telefono = ?1'
   )
@@ -343,159 +639,11 @@ export async function handleIncomingWhatsAppMessage(
     return '[Modo atención humana activo: mensaje guardado en bandeja de Mamá]';
   }
 
-  let replyText = '';
-
-  // 2. Si GEMINI_API_KEY está configurada, usar Gemini 2.5 Flash con Function Calling
-  if (env.GEMINI_API_KEY) {
-    try {
-      const todayBogota = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString().slice(0, 10);
-      const systemInstruction = `Eres la asistente virtual oficial de "${NOMBRE_OFICIAL_NEGOCIO}" en Colombia.
-Fecha actual de referencia (Colombia UTC-5): ${todayBogota}.
-
-DATOS Y REGLAS OBLIGATORIAS DEL NEGOCIO:
-1. Nombre oficial: ${NOMBRE_OFICIAL_NEGOCIO}.
-2. Modalidad de atención: Atendemos ÚNICAMENTE bajo reserva previa confirmada. NO trabajamos con horario fijo de atención al público sin cita; la disponibilidad depende exclusivamente de los espacios libres respecto a las citas ya reservadas en el sistema dentro de nuestra franja operativa de agendamiento. Si una clienta pregunta por el horario de atención o si puede ir sin cita, explícale amablemente que atendemos únicamente con reserva previa y ofrécele consultar los bloques disponibles para el día que desee.
-3. Pago anticipado y bloqueo: Toda reserva requiere el pago anticipado del 100% mediante el link seguro de pago en línea (Bold / Wompi) que generas automáticamente con \`crear_reserva_con_pago\`. Al crear la reserva en estado PENDIENTE_PAGO, el horario se bloquea por 20 minutos para que complete el pago.
-4. Política obligatoria de cancelación (DEBES informarla siempre al cotizar o crear una reserva): En caso de cancelación, ${NOMBRE_OFICIAL_NEGOCIO} reembolsa el 80% del valor pagado y retiene el 20% por gastos administrativos y reserva de agenda (${TEXTO_LEGAL_RETENCION_20}).
-5. Enlace seguro de la cita: Cuando ejecutes \`crear_reserva_con_pago\`, entrégale siempre a la clienta tanto el \`payment_link\` automático de Bold/Wompi como su enlace privado firmado \`link_gestion_cita\` para que pueda ver el estado o cancelar únicamente su reserva.
-6. Responde siempre en español cálido, profesional, claro y conciso para WhatsApp.`;
-
-      const toolsDeclaration = [
-        {
-          functionDeclarations: [
-            {
-              name: 'listar_servicios',
-              description:
-                'Devuelve el catálogo de servicios activos de Spa Superlook con categoría, precios en COP, duración y cálculo del 80% de reembolso.',
-            },
-            {
-              name: 'consultar_disponibilidad',
-              description:
-                'Consulta los bloques horarios disponibles bajo reserva previa para una fecha (YYYY-MM-DD) y un servicio_id.',
-              parameters: {
-                type: 'OBJECT',
-                properties: {
-                  fecha: { type: 'STRING', description: 'Fecha en formato YYYY-MM-DD' },
-                  servicio_id: { type: 'INTEGER', description: 'ID numérico del servicio' },
-                },
-                required: ['fecha', 'servicio_id'],
-              },
-            },
-            {
-              name: 'crear_reserva_con_pago',
-              description:
-                'Verifica que no exista solapamiento, crea la cita en estado PENDIENTE_PAGO, genera el link de pago en Wompi y devuelve el link privado firmado de la cita.',
-              parameters: {
-                type: 'OBJECT',
-                properties: {
-                  cliente_nombre: { type: 'STRING', description: 'Nombre completo de la clienta' },
-                  servicio_id: { type: 'INTEGER', description: 'ID numérico del servicio elegido' },
-                  fecha_hora_inicio: {
-                    type: 'STRING',
-                    description:
-                      'Fecha y hora de inicio en formato ISO8601 con zona -05:00 (ej. 2026-11-22T10:00:00-05:00)',
-                  },
-                },
-                required: ['cliente_nombre', 'servicio_id', 'fecha_hora_inicio'],
-              },
-            },
-          ],
-        },
-      ];
-
-      const contents: Array<Record<string, unknown>> = history.map((turn) => ({
-        role: turn.role,
-        parts: [{ text: turn.text }],
-      }));
-
-      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${env.GEMINI_API_KEY}`;
-
-      const firstRes = await fetch(geminiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemInstruction }] },
-          contents,
-          tools: toolsDeclaration,
-        }),
-      });
-
-      if (firstRes.ok) {
-        const firstJson = (await firstRes.json()) as GeminiResponse;
-        const firstParts = firstJson.candidates?.[0]?.content?.parts || [];
-        const fnCallPart = firstParts.find((p) => p.functionCall);
-
-        if (fnCallPart?.functionCall) {
-          const toolResult = await executeBotTool(env, fromPhone, fnCallPart.functionCall);
-
-          contents.push({
-            role: 'model',
-            parts: [{ functionCall: fnCallPart.functionCall }],
-          });
-          contents.push({
-            role: 'function',
-            parts: [
-              {
-                functionResponse: {
-                  name: fnCallPart.functionCall.name,
-                  response: toolResult,
-                },
-              },
-            ],
-          });
-
-          const secondRes = await fetch(geminiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              systemInstruction: { parts: [{ text: systemInstruction }] },
-              contents,
-              tools: toolsDeclaration,
-            }),
-          });
-
-          if (secondRes.ok) {
-            const secondJson = (await secondRes.json()) as GeminiResponse;
-            replyText =
-              secondJson.candidates?.[0]?.content?.parts
-                ?.map((p) => p.text || '')
-                .join('\n')
-                .trim() || '';
-          }
-        } else {
-          replyText = firstParts
-            .map((p) => p.text || '')
-            .join('\n')
-            .trim();
-        }
-      }
-    } catch (err) {
-      console.error('Error en llamada a Gemini API:', err);
-    }
-  }
-
-  // 3. Fallback local determinístico si GEMINI_API_KEY no está definida o falla la red
+  let replyText = await runGeminiConversation(env, history, fromPhone, 'WhatsApp Bot');
   if (!replyText) {
-    const { results: servicios } = await env.DB.prepare(
-      'SELECT id, categoria, nombre, duracion_minutos, precio_cop FROM servicios WHERE activo = 1 ORDER BY categoria ASC, id ASC'
-    ).all<ServicioRow>();
-
-    const listado = (servicios || [])
-      .map(
-        (s) =>
-          `• *${s.id}. [${s.categoria || 'General'}] ${s.nombre}* (${s.duracion_minutos} min) — ${formatCOP(s.precio_cop)} (Reembolso 80% si cancelas: ${formatCOP(Math.round(s.precio_cop * 0.8))})`
-      )
-      .join('\n');
-
-    replyText =
-      `✨ *¡Hola! Bienvenida a ${NOMBRE_OFICIAL_NEGOCIO}* ✨\n\n` +
-      `🗓️ *Modalidad de atención:* Atendemos *ÚNICAMENTE bajo reserva previa* (no manejamos atención sin cita previa; tu cupo se agenda según los bloques disponibles).\n\n` +
-      `Estos son nuestros servicios activos:\n${listado}\n\n` +
-      `📌 *${TEXTO_LEGAL_RETENCION_20}*\n\n` +
-      `Indícanos tu nombre, qué servicio deseas y para qué fecha/hora para verificar disponibilidad y generarte tu link de pago en Wompi.`;
+    replyText = await buildFallbackGreeting(env);
   }
 
-  // 4. Guardar historial actualizado en D1 / Supabase (`chat_sesiones`)
   const replyIso = new Date().toISOString();
   history.push({ role: 'model', text: replyText, sender: 'bot', timestamp: replyIso });
 
@@ -509,8 +657,36 @@ DATOS Y REGLAS OBLIGATORIAS DEL NEGOCIO:
     .bind(fromPhone, JSON.stringify({ turns: history, human_takeover: false }), replyIso)
     .run();
 
-  // 5. Enviar respuesta al cliente por WhatsApp Cloud API
   await sendWhatsAppText(env, fromPhone, replyText);
 
   return replyText;
+}
+
+/**
+ * Procesa una conversación del Asistente IA directamente desde la Página Web (modo híbrido).
+ * Comparte la misma inteligencia, catálogo, disponibilidad en vivo y alertas de cotización a Mamá.
+ */
+export async function handleWebChatMessage(
+  env: Env,
+  historyInput: ChatTurn[],
+  userMessage: string,
+  clientPhone = ''
+): Promise<string> {
+  const sanitizedHistory: ChatTurn[] = (Array.isArray(historyInput) ? historyInput : [])
+    .slice(-10)
+    .map((t) => ({
+      role: t.role === 'model' ? 'model' : 'user',
+      text: String(t.text || '').slice(0, 1200),
+    }));
+
+  sanitizedHistory.push({
+    role: 'user',
+    text: userMessage.slice(0, 1200),
+  });
+
+  let reply = await runGeminiConversation(env, sanitizedHistory, clientPhone, 'Página Web');
+  if (!reply) {
+    reply = await buildFallbackGreeting(env);
+  }
+  return reply;
 }

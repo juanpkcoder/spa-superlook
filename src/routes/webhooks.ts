@@ -374,6 +374,10 @@ interface MetaWhatsAppWebhookBody {
     changes?: Array<{
       field?: string;
       value?: {
+        contacts?: Array<{
+          profile?: { name?: string };
+          wa_id?: string;
+        }>;
         messages?: Array<{
           from: string;
           id: string;
@@ -381,6 +385,11 @@ interface MetaWhatsAppWebhookBody {
           type: string;
           text?: {
             body: string;
+          };
+          image?: {
+            id?: string;
+            caption?: string;
+            mime_type?: string;
           };
         }>;
       };
@@ -394,6 +403,7 @@ interface MetaWhatsAppWebhookBody {
  * 1. Valida la firma `X-Hub-Signature-256` si `META_APP_SECRET` está configurado.
  * 2. Responde 200 OK de inmediato para evitar reintentos de Meta, delegando el procesamiento
  *    del bot Gemini a `c.executionCtx.waitUntil(...)`.
+ * 3. Soporta mensajes de texto y fotos de referencia (uñas / cabello) notificando a Mamá.
  */
 webhookRoutes.post('/whatsapp', async (c) => {
   const rawBody = await c.req.text();
@@ -422,14 +432,21 @@ webhookRoutes.post('/whatsapp', async (c) => {
   }
 
   const entries = body.entry || [];
-  const incomingTasks: Array<{ from: string; text: string }> = [];
+  const incomingTasks: Array<{ from: string; text: string; isImage?: boolean; contactName?: string }> = [];
 
   for (const entry of entries) {
     for (const change of entry.changes || []) {
+      const contactName = change.value?.contacts?.[0]?.profile?.name || 'Clienta WhatsApp';
       const messages = change.value?.messages || [];
       for (const msg of messages) {
         if (msg.type === 'text' && msg.text?.body && msg.from) {
-          incomingTasks.push({ from: msg.from, text: msg.text.body });
+          incomingTasks.push({ from: msg.from, text: msg.text.body, contactName });
+        } else if (msg.type === 'image' && msg.from) {
+          const caption = (msg.image?.caption || '').trim();
+          const syntheticText = caption
+            ? `[Envié una foto de referencia de diseño/cabello con comentario: "${caption}"]`
+            : '[Envié una foto de referencia de un diseño de uñas o cabello para cotizar]';
+          incomingTasks.push({ from: msg.from, text: syntheticText, isImage: true, contactName });
         }
       }
     }
@@ -438,6 +455,16 @@ webhookRoutes.post('/whatsapp', async (c) => {
   const processAllMessages = async () => {
     for (const task of incomingTasks) {
       try {
+        if (task.isImage && c.env.ADMIN_PHONE) {
+          await sendWhatsAppText(
+            c.env,
+            c.env.ADMIN_PHONE,
+            `📸 *[${NOMBRE_OFICIAL_NEGOCIO} - Foto de Referencia para Cotizar]*\n` +
+              `• *Clienta:* ${task.contactName} (+${task.from})\n` +
+              `• *Mensaje:* ${task.text}\n` +
+              `• *Responder directo:* https://wa.me/${task.from}`
+          );
+        }
         await handleIncomingWhatsAppMessage(c.env, task.from, task.text);
       } catch (err) {
         console.error(`Error procesando mensaje WhatsApp de ${task.from}:`, err);

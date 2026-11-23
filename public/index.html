@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#9e3363" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="Spa Superlook" />
@@ -442,6 +443,95 @@
       <a href="/?admin=1" onclick="event.preventDefault(); switchView('admin');" class="footer-admin-link">Acceso Privado Administración</a>
     </p>
   </footer>
+
+  <!-- Botón flotante de Asistente IA Híbrido & Cotizador de Uñas / Cabello -->
+  <button
+    type="button"
+    id="fabConciergeBtn"
+    class="fab-concierge"
+    onclick="openConciergeModal('cotizar')"
+    aria-label="Cotizar diseño de uñas o cabello y chatear con Spa Superlook"
+  >
+    <span>✨ Cotizar / Asistente IA</span>
+  </button>
+
+  <!-- Modal Híbrido: Cotizador de Diseños (Uñas / Cabello) + Asistente IA en Vivo -->
+  <div id="conciergeModal" class="concierge-modal hidden" role="dialog" aria-modal="true" aria-label="Asistente y Cotizador Spa Superlook">
+    <div class="concierge-sheet">
+      <div class="concierge-header">
+        <div>
+          <div style="font-size:0.7rem; font-weight:800; text-transform:uppercase; color:var(--pink-700);">✨ Spa Superlook Concierge</div>
+          <h3 style="font-size:1.35rem; line-height:1.1;">Cotizador de Diseños & Chat IA</h3>
+        </div>
+        <button type="button" class="concierge-close" onclick="closeConciergeModal()" aria-label="Cerrar">✕</button>
+      </div>
+
+      <div class="concierge-tabs">
+        <button type="button" id="cTabCotizar" class="concierge-tab active" onclick="switchConciergeTab('cotizar')">
+          💅 Cotizar Uñas / Cabello
+        </button>
+        <button type="button" id="cTabChat" class="concierge-tab" onclick="switchConciergeTab('chat')">
+          💬 Asistente IA en Vivo
+        </button>
+      </div>
+
+      <!-- Tab 1: Formulario Rápido de Cotización (Avisa al instante a Mamá por WhatsApp) -->
+      <div id="conciergePaneCotizar" class="concierge-pane">
+        <p style="font-size:0.81rem; color:var(--neutral-500); margin-bottom:0.8rem;">
+          ¿Quieres un diseño especial de uñas, balayage, tintura o tratamiento para tu cabello? Cuéntanos los detalles y avisamos al instante a nuestra especialista por WhatsApp.
+        </p>
+        <form id="quoteForm" onsubmit="handleQuoteSubmit(event)">
+          <div class="form-group">
+            <label for="quoteCategoria">¿Qué deseas cotizar?</label>
+            <select id="quoteCategoria" class="form-control" required>
+              <option value="Uñas & Nail Art">💅 Diseño de Uñas (Acrílicas / Semipermanente / Nail Art)</option>
+              <option value="Cabello & Colorimetría">💇‍♀️ Cabello & Colorimetría (Balayage / Tintura / Iluminación)</option>
+              <option value="Alisados & Keratina">✨ Keratina / Alisado / Tratamiento Capilar</option>
+              <option value="Cejas & Pestañas">👁️ Cejas HD / Laminado / Lifting de Pestañas</option>
+              <option value="Facial & Spa">🧖‍♀️ Facial / Limpieza / Spa</option>
+              <option value="Maquillaje & Peinado">💄 Maquillaje & Peinado Social / Eventos</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="quoteNombre">Tu Nombre</label>
+              <input type="text" id="quoteNombre" class="form-control" placeholder="Ej: Camila Rojas" required />
+            </div>
+            <div class="form-group">
+              <label for="quoteTelefono">Tu WhatsApp</label>
+              <input type="tel" id="quoteTelefono" class="form-control" placeholder="Ej: 3105551234" required />
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="quoteDescripcion">Describe tu diseño o cabello</label>
+            <textarea id="quoteDescripcion" class="form-control" rows="3" placeholder="Ej: Cabello a media espalda castaño oscuro, quiero balayage tono caramelo... o uñas acrílicas #3 con diseño francés y brillos" required></textarea>
+          </div>
+          <div class="form-group">
+            <label for="quoteFecha">Fecha tentativa (Opcional)</label>
+            <input type="text" id="quoteFecha" class="form-control" placeholder="Ej: Este sábado en la mañana" />
+          </div>
+          <button type="submit" id="btnQuoteSubmit" class="btn btn-primary btn-block btn-animated">
+            📲 Enviar Cotización y Avisar a la Especialista
+          </button>
+        </form>
+        <div id="quoteResultBox" class="result-box hidden" style="margin-top:0.8rem;"></div>
+      </div>
+
+      <!-- Tab 2: Chat Asistente IA en Vivo (Sincronizado con Agenda y Bold) -->
+      <div id="conciergePaneChat" class="concierge-pane hidden">
+        <div id="webChatMessages" class="web-chat-messages">
+          <div class="chat-bubble chat-bubble-bot">
+            <div style="font-size:0.68rem; font-weight:800; opacity:0.75; margin-bottom:0.15rem;">Spa Superlook Concierge ✨</div>
+            <div>¡Hola hermosa! 🌸 Qué alegría saludarte, bienvenida a <strong>Spa Superlook</strong>. Puedo ayudarte a ver precios, consultar horarios en vivo, cotizar un diseño de uñas o cabello, o agendar tu cita directo aquí con pago en <strong>Bold</strong>. ¿En qué te consiento hoy?</div>
+          </div>
+        </div>
+        <form class="web-chat-input-row" onsubmit="handleWebChatSubmit(event)">
+          <input type="text" id="webChatInput" class="form-control" placeholder="Pregunta precios, horarios o cotiza un diseño..." required />
+          <button type="submit" id="btnWebChatSend" class="btn btn-primary btn-sm">Enviar</button>
+        </form>
+      </div>
+    </div>
+  </div>
 
   <!-- Banner discreto de Política de Cookies -->
   <div id="cookieBanner" class="cookie-banner hidden" role="dialog" aria-label="Aviso de Cookies">

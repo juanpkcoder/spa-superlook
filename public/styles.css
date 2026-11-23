@@ -41,6 +41,11 @@
   padding: 0;
 }
 
+html {
+  overflow-x: hidden;
+  max-width: 100%;
+}
+
 body {
   font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
   color: var(--neutral-900);
@@ -48,6 +53,7 @@ body {
   min-height: 100vh;
   line-height: 1.55;
   overflow-x: hidden;
+  max-width: 100%;
   position: relative;
 }
 
@@ -301,14 +307,19 @@ h1, h2, h3 {
 
 .grid-two-cols {
   display: grid;
-  grid-template-columns: 1.06fr 0.94fr;
+  grid-template-columns: minmax(0, 1.06fr) minmax(0, 0.94fr);
   gap: 1.45rem;
   align-items: start;
 }
 
+.grid-two-cols > *, .card, .form-group, .form-control {
+  min-width: 0;
+  max-width: 100%;
+}
+
 @media (max-width: 960px) {
   .grid-two-cols {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -1008,15 +1019,135 @@ label {
   gap: 0.45rem;
 }
 
-/* Banner discreto de Política de Cookies */
+/* Botón Flotante y Modal de Cotizador / Asistente IA Híbrido */
+.fab-concierge {
+  position: fixed;
+  right: 1.2rem;
+  bottom: 1.3rem;
+  z-index: 65;
+  background: linear-gradient(135deg, var(--pink-700), var(--blue-600));
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 0.78rem 1.2rem;
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 14px 32px -6px rgba(158, 51, 99, 0.55);
+  transition: transform 0.25s var(--ease-out-expo), box-shadow 0.25s;
+}
+
+.fab-concierge:hover {
+  transform: translateY(-3px) scale(1.03);
+  box-shadow: 0 18px 38px -6px rgba(158, 51, 99, 0.65);
+}
+
+.concierge-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(24, 29, 38, 0.55);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0.75rem;
+}
+
+@media (min-width: 769px) {
+  .concierge-modal {
+    align-items: center;
+  }
+}
+
+.concierge-sheet {
+  width: min(100%, 520px);
+  max-height: 88vh;
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 22px;
+  padding: 1.25rem;
+  box-shadow: 0 24px 60px rgba(24, 29, 38, 0.28);
+  border-top: 4px solid var(--pink-500);
+  animation: fadeInUp 0.35s var(--ease-out-expo) both;
+}
+
+.concierge-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.85rem;
+}
+
+.concierge-close {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--neutral-200);
+  background: var(--neutral-100);
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.concierge-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45rem;
+  margin-bottom: 0.95rem;
+  background: var(--neutral-100);
+  padding: 0.3rem;
+  border-radius: 12px;
+}
+
+.concierge-tab {
+  border: none;
+  background: transparent;
+  padding: 0.55rem 0.5rem;
+  border-radius: 9px;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--neutral-700);
+  cursor: pointer;
+}
+
+.concierge-tab.active {
+  background: #fff;
+  color: var(--pink-700);
+  box-shadow: 0 3px 10px rgba(24, 29, 38, 0.08);
+}
+
+.web-chat-messages {
+  background: var(--neutral-50);
+  border: 1px solid var(--neutral-200);
+  border-radius: var(--radius-md);
+  padding: 0.8rem;
+  height: 310px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  font-size: 0.84rem;
+  margin-bottom: 0.75rem;
+}
+
+.web-chat-input-row {
+  display: flex;
+  gap: 0.45rem;
+}
+
+/* Banner discreto de Política de Cookies (centrado sin desbordes) */
 .cookie-banner {
   position: fixed;
   bottom: 1rem;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 0;
+  right: 0;
+  margin: 0 auto;
   width: min(94%, 680px);
   z-index: 60;
-  background: rgba(255, 255, 255, 0.96);
+  background: rgba(255, 255, 255, 0.97);
   backdrop-filter: blur(14px);
   border: 1px solid var(--pink-200);
   border-radius: var(--radius-md);
@@ -1196,9 +1327,19 @@ label {
     min-height: 46px;
   }
 
-  /* Header súper compacto arriba para dejar el contenido visible de inmediato */
+  /* Header súper compacto arriba — SIN backdrop-filter en móvil para que .nav-tabs quede fija abajo del viewport */
   .site-header {
     padding: 0.6rem 0.95rem;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: rgba(255, 255, 255, 0.97);
+  }
+
+  .fab-concierge {
+    right: 0.85rem;
+    bottom: calc(74px + env(safe-area-inset-bottom, 0px));
+    padding: 0.68rem 1rem;
+    font-size: 0.78rem;
   }
 
   .header-container {

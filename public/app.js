@@ -15,6 +15,7 @@ const state = {
   adminServicios: [],
   adminChats: [],
   chatPollingTimer: null,
+  webChatHistory: [],
 };
 
 function formatCOP(valor) {
@@ -71,6 +72,11 @@ function switchView(view) {
       tabs[k].classList.remove('active');
     }
   });
+
+  const fab = document.getElementById('fabConciergeBtn');
+  if (fab) {
+    fab.classList.toggle('hidden', view === 'admin');
+  }
 
   if (view === 'admin') {
     checkAndLoadAdminPanel();
@@ -343,7 +349,7 @@ async function handleBookingSubmit(event) {
     resultBox.classList.remove('hidden');
     resultBox.innerHTML = `
       <h3 style="margin-bottom:0.4rem">✅ ¡Ticket de Reserva Creado Automáticamente!</h3>
-      <p style="margin-bottom:0.65rem">Tu turno ha sido bloqueado por <strong>20 minutos</strong> y también enviamos el enlace a tu WhatsApp. Completa tu pago del 100% en <strong>${escapeHtml(gatewayLabel)}</strong> para confirmar tu cita en <strong>Spa Superlook</strong>.</p>
+      <p style="margin-bottom:0.65rem">Tu turno ha sido bloqueado por <strong>20 minutos</strong> y enviamos tu enlace a WhatsApp. Te estamos redirigiendo automáticamente a <strong>${escapeHtml(gatewayLabel)}</strong> para completar el pago...</p>
       <div style="margin-bottom:0.75rem; font-size:0.83rem;">
         <div>• <strong>Servicio:</strong> ${escapeHtml(cita.servicio_nombre)}</div>
         <div>• <strong>Fecha/Hora:</strong> ${escapeHtml(formatDateTimeLocal(cita.fecha_hora_inicio))}</div>
@@ -352,20 +358,31 @@ async function handleBookingSubmit(event) {
         <div>• <strong>Reembolso 80% si cancelas:</strong> ${formatCOP(cita.monto_reembolso_80)} (Retención 20%: ${formatCOP(cita.monto_retencion_20)})</div>
       </div>
       <div style="display:flex; gap:0.6rem; flex-wrap:wrap;">
-        <a href="${escapeHtml(data.payment_link)}" target="_blank" rel="noopener" class="btn btn-primary btn-animated">
-          💳 Pagar Ahora en ${escapeHtml(gatewayLabel)} (${formatCOP(cita.monto_total)})
+        <a href="${escapeHtml(data.payment_link)}" class="btn btn-primary btn-animated">
+          💳 Ir a Pagar en ${escapeHtml(gatewayLabel)} (${formatCOP(cita.monto_total)})
         </a>
         <button type="button" class="btn btn-secondary" onclick="openPrivateCitaView('${escapeHtml(cita.id)}', '${escapeHtml(token)}')">
-          🎟️ Ver / Gestionar Mi Ticket Privado
+          🎟️ Ver Mi Ticket Privado
         </button>
       </div>
       <p style="margin-top:0.65rem; font-size:0.77rem; color:#383e4c;">
-        🔒 Guarda tu enlace privado de gestión: <a href="${escapeHtml(manageUrl)}">${escapeHtml(manageUrl)}</a>
+        🔒 Tu enlace privado de gestión: <a href="${escapeHtml(manageUrl)}">${escapeHtml(manageUrl)}</a>
       </p>
     `;
 
+    try {
+      localStorage.setItem('superlook_last_ticket_url', manageUrl);
+    } catch {}
+
     resultBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     await loadAvailableSlots();
+
+    // Emitir y redirigir automáticamente al link de pago oficial de Bold / Wompi
+    if (data.payment_link && data.payment_link.startsWith('https://')) {
+      setTimeout(() => {
+        window.location.href = data.payment_link;
+      }, 1200);
+    }
   } catch (err) {
     resultBox.classList.remove('hidden');
     resultBox.innerHTML = `<div class="alert-error">${escapeHtml(err.message)}</div>`;
@@ -1357,6 +1374,148 @@ async function toggleServiceActive(id, nuevoActivo) {
     await loadAdminData();
   } catch (err) {
     alert(`Error: ${err.message}`);
+  }
+}
+
+// ============================================================================
+// 6. ASISTENTE IA HÍBRIDO EN LA WEB & COTIZADOR DE UÑAS / CABELLO (AVISO A MAMÁ)
+// ============================================================================
+function openConciergeModal(initialTab = 'cotizar') {
+  const modal = document.getElementById('conciergeModal');
+  if (modal) {
+    modal.classList.remove('hidden');
+    switchConciergeTab(initialTab);
+  }
+}
+
+function closeConciergeModal() {
+  const modal = document.getElementById('conciergeModal');
+  if (modal) modal.classList.add('hidden');
+}
+
+function switchConciergeTab(tab) {
+  const isQuote = tab === 'cotizar';
+  document.getElementById('cTabCotizar')?.classList.toggle('active', isQuote);
+  document.getElementById('cTabChat')?.classList.toggle('active', !isQuote);
+  document.getElementById('conciergePaneCotizar')?.classList.toggle('hidden', !isQuote);
+  document.getElementById('conciergePaneChat')?.classList.toggle('hidden', isQuote);
+}
+
+async function handleQuoteSubmit(event) {
+  event.preventDefault();
+  const btn = document.getElementById('btnQuoteSubmit');
+  const box = document.getElementById('quoteResultBox');
+
+  const payload = {
+    categoria: document.getElementById('quoteCategoria').value,
+    cliente_nombre: document.getElementById('quoteNombre').value.trim(),
+    cliente_telefono: document.getElementById('quoteTelefono').value.trim(),
+    descripcion_diseno: document.getElementById('quoteDescripcion').value.trim(),
+    fecha_tentativa: document.getElementById('quoteFecha').value.trim(),
+  };
+
+  btn.disabled = true;
+  btn.textContent = 'Enviando cotización y avisando a nuestra especialista...';
+  box.classList.add('hidden');
+
+  try {
+    const res = await fetch(`${API_BASE}/api/cotizaciones`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      throw new Error(data.error || 'No se pudo enviar la cotización.');
+    }
+
+    document.getElementById('quoteForm').reset();
+    box.classList.remove('hidden');
+    box.innerHTML = `
+      <strong>✨ ¡Cotización enviada con éxito!</strong>
+      <p style="margin-top:0.35rem;">${escapeHtml(data.mensaje)}</p>
+      <p style="margin-top:0.3rem; font-size:0.8rem;">💰 <strong>${escapeHtml(data.estimado_orientativo)}</strong></p>
+      <p style="margin-top:0.35rem; font-size:0.78rem;">¿Tienes foto de inspiración? Puedes enviarla directo a nuestro WhatsApp: <a href="https://wa.me/573124597896" target="_blank" rel="noopener" style="color:var(--pink-700); font-weight:700;">+57 312 459 7896</a></p>
+    `;
+  } catch (err) {
+    box.classList.remove('hidden');
+    box.innerHTML = `<div class="alert-error">${escapeHtml(err.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '📲 Enviar Cotización y Avisar a la Especialista';
+  }
+}
+
+function linkifySafeText(rawText) {
+  const escaped = escapeHtml(rawText).replace(/\n/g, '<br />');
+  return escaped.replace(
+    /(https:\/\/[^\s<]+)/g,
+    '<a href="$1" target="_blank" rel="noopener" style="color:var(--pink-700); font-weight:700; text-decoration:underline;">$1</a>'
+  );
+}
+
+async function handleWebChatSubmit(event) {
+  event.preventDefault();
+  const input = document.getElementById('webChatInput');
+  const btn = document.getElementById('btnWebChatSend');
+  const box = document.getElementById('webChatMessages');
+  if (!input || !box) return;
+
+  const text = input.value.trim();
+  if (!text) return;
+
+  box.innerHTML += `
+    <div class="chat-bubble chat-bubble-client">
+      <div style="font-size:0.68rem; font-weight:800; opacity:0.75; margin-bottom:0.15rem;">Tú</div>
+      <div>${escapeHtml(text)}</div>
+    </div>
+  `;
+  box.scrollTop = box.scrollHeight;
+  input.value = '';
+  input.disabled = true;
+  btn.disabled = true;
+
+  const typingId = `typing_${Date.now()}`;
+  box.innerHTML += `
+    <div id="${typingId}" class="chat-bubble chat-bubble-bot">
+      <em>Escribiendo... ✨</em>
+    </div>
+  `;
+  box.scrollTop = box.scrollHeight;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/chat-web`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: text,
+        history: state.webChatHistory,
+      }),
+    });
+    const data = await res.json();
+    document.getElementById(typingId)?.remove();
+
+    const reply = data.reply || data.error || 'Ocurrió un error, intenta de nuevo.';
+    state.webChatHistory.push({ role: 'user', text });
+    state.webChatHistory.push({ role: 'model', text: reply });
+    if (state.webChatHistory.length > 12) {
+      state.webChatHistory = state.webChatHistory.slice(state.webChatHistory.length - 12);
+    }
+
+    box.innerHTML += `
+      <div class="chat-bubble chat-bubble-bot">
+        <div style="font-size:0.68rem; font-weight:800; opacity:0.75; margin-bottom:0.15rem;">Spa Superlook Concierge ✨</div>
+        <div>${linkifySafeText(reply)}</div>
+      </div>
+    `;
+    box.scrollTop = box.scrollHeight;
+  } catch (err) {
+    document.getElementById(typingId)?.remove();
+    box.innerHTML += `<div class="alert-error">${escapeHtml(err.message)}</div>`;
+  } finally {
+    input.disabled = false;
+    btn.disabled = false;
+    input.focus();
   }
 }
 
