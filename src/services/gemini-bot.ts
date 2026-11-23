@@ -501,11 +501,9 @@ function getToolsDeclaration() {
 }
 
 const GEMINI_MODEL_FALLBACK_CHAIN = [
-  'gemini-3.8-flash',
-  'gemini-3.7-flash',
-  'gemini-3.5-flash',
-  'gemini-flash-latest',
+  'gemini-flash-lite-latest',
   'gemini-3.5-flash-lite',
+  'gemini-3.8-flash',
 ];
 
 async function callGeminiWithFallback(
@@ -519,6 +517,7 @@ async function callGeminiWithFallback(
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(7000),
       });
 
       if (res.ok) {
@@ -528,7 +527,7 @@ async function callGeminiWithFallback(
       const errText = await res.text();
       console.error(`Gemini model ${model} HTTP ${res.status}:`, errText.slice(0, 220));
     } catch (err) {
-      console.error(`Gemini model ${model} network error:`, err);
+      console.error(`Gemini model ${model} network/timeout error:`, err);
     }
   }
   return null;
