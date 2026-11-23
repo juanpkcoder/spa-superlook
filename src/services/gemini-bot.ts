@@ -45,6 +45,7 @@ export function parseChatSession(rawJson: string | null | undefined): StoredChat
 }
 
 interface GeminiFunctionCall {
+  id?: string;
   name: string;
   args: Record<string, unknown>;
 }
@@ -52,11 +53,14 @@ interface GeminiFunctionCall {
 interface GeminiCandidatePart {
   text?: string;
   functionCall?: GeminiFunctionCall;
+  thoughtSignature?: string;
+  [key: string]: unknown;
 }
 
 interface GeminiResponse {
   candidates?: Array<{
     content?: {
+      role?: string;
       parts?: GeminiCandidatePart[];
     };
   }>;
@@ -563,21 +567,24 @@ async function runGeminiConversation(
         break;
       }
 
-      const parts = json.candidates?.[0]?.content?.parts || [];
+      const modelContent = json.candidates?.[0]?.content;
+      const parts = modelContent?.parts || [];
       const fnCallPart = parts.find((p) => p.functionCall);
 
-      if (fnCallPart?.functionCall) {
+      if (fnCallPart?.functionCall && modelContent) {
         const toolResult = await executeBotTool(env, fromPhone, origin, fnCallPart.functionCall);
+        // Preservar el content exacto devuelto por Gemini 3.x (incluye thoughtSignature obligatorio)
         contents.push({
-          role: 'model',
-          parts: [{ functionCall: fnCallPart.functionCall }],
+          role: modelContent.role || 'model',
+          parts: modelContent.parts || [{ functionCall: fnCallPart.functionCall }],
         });
         contents.push({
-          role: 'function',
+          role: 'user',
           parts: [
             {
               functionResponse: {
                 name: fnCallPart.functionCall.name,
+                ...(fnCallPart.functionCall.id ? { id: fnCallPart.functionCall.id } : {}),
                 response: toolResult,
               },
             },
