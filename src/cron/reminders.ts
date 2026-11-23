@@ -14,7 +14,8 @@ export interface RemindersExecutionSummary {
   sent2hCount: number;
 }
 
-const UBICACION_ATENCION = 'Spa Superlook (Atención exclusiva con reserva previa confirmada)';
+const UBICACION_ATENCION =
+  'Transversal 86A #83A-30 · Spa Superlook (Atención exclusiva con reserva previa)';
 
 /**
  * Ejecuta la tarea programada (Cron Trigger cada hora) para enviar recordatorios
