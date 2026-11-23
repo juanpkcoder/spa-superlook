@@ -500,6 +500,40 @@ function getToolsDeclaration() {
   ];
 }
 
+const GEMINI_MODEL_FALLBACK_CHAIN = [
+  'gemini-3.8-flash',
+  'gemini-3.7-flash',
+  'gemini-3.5-flash',
+  'gemini-flash-latest',
+  'gemini-3.5-flash-lite',
+];
+
+async function callGeminiWithFallback(
+  apiKey: string,
+  payload: Record<string, unknown>
+): Promise<GeminiResponse | null> {
+  for (const model of GEMINI_MODEL_FALLBACK_CHAIN) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        return (await res.json()) as GeminiResponse;
+      }
+
+      const errText = await res.text();
+      console.error(`Gemini model ${model} HTTP ${res.status}:`, errText.slice(0, 220));
+    } catch (err) {
+      console.error(`Gemini model ${model} network error:`, err);
+    }
+  }
+  return null;
+}
+
 async function runGeminiConversation(
   env: Env,
   history: ChatTurn[],
@@ -518,26 +552,18 @@ async function runGeminiConversation(
       parts: [{ text: turn.text }],
     }));
 
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${env.GEMINI_API_KEY}`;
-
-    // Soportar hasta 2 rondas de Function Calling (ej. listar_servicios -> consultar_disponibilidad o cotizar)
-    for (let step = 0; step < 2; step++) {
-      const res = await fetch(geminiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemInstruction }] },
-          contents,
-          tools: toolsDeclaration,
-        }),
+    // Soportar hasta 3 rondas de Function Calling (ej. listar_servicios -> consultar_disponibilidad -> crear_reserva_con_pago o cotizar)
+    for (let step = 0; step < 3; step++) {
+      const json = await callGeminiWithFallback(env.GEMINI_API_KEY, {
+        systemInstruction: { parts: [{ text: systemInstruction }] },
+        contents,
+        tools: toolsDeclaration,
       });
 
-      if (!res.ok) {
-        console.error('Gemini API HTTP error:', res.status, await res.text());
+      if (!json) {
         break;
       }
 
-      const json = (await res.json()) as GeminiResponse;
       const parts = json.candidates?.[0]?.content?.parts || [];
       const fnCallPart = parts.find((p) => p.functionCall);
 
